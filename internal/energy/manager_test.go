@@ -1,0 +1,157 @@
+package energy
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"testing"
+
+	"github.com/hongkongstar6/trc20/internal/config"
+)
+
+type fakeProvider struct {
+	name    string
+	cost    float64
+	billed  int64
+	err     error
+	quotes  int
+	deposit string
+	balance float64
+}
+
+func (f *fakeProvider) Name() string { return f.name }
+
+func (f *fakeProvider) Quote(context.Context, QuoteRequest) (*Quote, error) {
+	f.quotes++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &Quote{Provider: f.name, CostTRX: f.cost, BilledUnits: f.billed, Period: "1h"}, nil
+}
+
+func (f *fakeProvider) Ensure(context.Context, OrderRequest) (*Order, error) {
+	return &Order{Provider: f.name, State: StatePending}, nil
+}
+
+func (f *fakeProvider) Poll(context.Context, string) (*Order, error) {
+	return &Order{Provider: f.name, State: StateDelegated}, nil
+}
+
+func (f *fakeProvider) Balance(context.Context) (float64, string, error) {
+	return f.balance, f.deposit, nil
+}
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func newTestManager(mode string, provs map[string]Provider) *Manager {
+	cfg := config.EnergyConfig{Mode: mode, DefaultPeriod: "1h", QuoteCacheTTL: "1ms"}
+	return NewManager(cfg, nil, nil, testLogger(), provs)
+}
+
+func TestBestQuotePicksCheapest(t *testing.T) {
+	mgr := newTestManager("cheapest", map[string]Provider{
+		"expensive": &fakeProvider{name: "expensive", cost: 2.45, billed: 64400},
+		"cheap":     &fakeProvider{name: "cheap", cost: 1.69, billed: 32000},
+		"trx_burn":  &fakeProvider{name: "trx_burn", cost: 3.20, billed: 32000},
+	})
+	q, err := mgr.BestQuote(context.Background(), QuoteRequest{Resource: ResourceEnergy, Amount: 32000})
+	if err != nil {
+		t.Fatalf("BestQuote: %v", err)
+	}
+	if q.Provider != "cheap" {
+		t.Fatalf("provider = %s, want cheap", q.Provider)
+	}
+}
+
+// A provider that is out of stock or unreachable must not block the sweep: it
+// simply drops out of the comparison.
+func TestBestQuoteSkipsFailingProviders(t *testing.T) {
+	mgr := newTestManager("cheapest", map[string]Provider{
+		"broken":   &fakeProvider{name: "broken", err: errors.New("out of stock")},
+		"trx_burn": &fakeProvider{name: "trx_burn", cost: 3.20, billed: 32000},
+	})
+	q, err := mgr.BestQuote(context.Background(), QuoteRequest{Resource: ResourceEnergy, Amount: 32000})
+	if err != nil {
+		t.Fatalf("BestQuote: %v", err)
+	}
+	if q.Provider != "trx_burn" {
+		t.Fatalf("provider = %s, want the trx_burn fallback", q.Provider)
+	}
+}
+
+func TestBestQuoteFailsWhenEveryProviderFails(t *testing.T) {
+	mgr := newTestManager("cheapest", map[string]Provider{
+		"a": &fakeProvider{name: "a", err: errors.New("boom")},
+		"b": &fakeProvider{name: "b", err: errors.New("boom")},
+	})
+	if _, err := mgr.BestQuote(context.Background(), QuoteRequest{Resource: ResourceEnergy, Amount: 32000}); !errors.Is(err, ErrNoProvider) {
+		t.Fatalf("err = %v, want ErrNoProvider", err)
+	}
+}
+
+// Priority mode must prefer real rentals over burning TRX even when burning
+// happens to quote cheaper at that moment.
+func TestPriorityModeKeepsBurnLast(t *testing.T) {
+	mgr := newTestManager("priority", map[string]Provider{
+		"trx_burn":       &fakeProvider{name: "trx_burn", cost: 0.01, billed: 32000},
+		"tronenergyrent": &fakeProvider{name: "tronenergyrent", cost: 1.69, billed: 32000},
+	})
+	q, err := mgr.BestQuote(context.Background(), QuoteRequest{Resource: ResourceEnergy, Amount: 32000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Provider != "tronenergyrent" {
+		t.Fatalf("provider = %s, want tronenergyrent", q.Provider)
+	}
+}
+
+func TestFixedModeUsesConfiguredProvider(t *testing.T) {
+	cfg := config.EnergyConfig{Mode: "fixed", Fixed: "trx_burn", DefaultPeriod: "1h"}
+	mgr := NewManager(cfg, nil, nil, testLogger(), map[string]Provider{
+		"trx_burn":       &fakeProvider{name: "trx_burn", cost: 3.2, billed: 32000},
+		"tronenergyrent": &fakeProvider{name: "tronenergyrent", cost: 1.0, billed: 32000},
+	})
+	q, err := mgr.BestQuote(context.Background(), QuoteRequest{Resource: ResourceEnergy, Amount: 32000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Provider != "trx_burn" {
+		t.Fatalf("provider = %s, want the pinned trx_burn", q.Provider)
+	}
+}
+
+func TestFixedModeFailsWhenProviderMissing(t *testing.T) {
+	cfg := config.EnergyConfig{Mode: "fixed", Fixed: "gasstation"}
+	mgr := NewManager(cfg, nil, nil, testLogger(), map[string]Provider{
+		"trx_burn": &fakeProvider{name: "trx_burn"},
+	})
+	if _, err := mgr.BestQuote(context.Background(), QuoteRequest{Amount: 1}); err == nil {
+		t.Fatal("a missing pinned provider must be an error, not a silent fallback")
+	}
+}
+
+func TestQuoteCacheAvoidsRepeatedCalls(t *testing.T) {
+	p := &fakeProvider{name: "trx_burn", cost: 3.2, billed: 32000}
+	cfg := config.EnergyConfig{Mode: "cheapest", DefaultPeriod: "1h", QuoteCacheTTL: "1m"}
+	mgr := NewManager(cfg, nil, nil, testLogger(), map[string]Provider{"trx_burn": p})
+	for i := 0; i < 3; i++ {
+		if _, err := mgr.BestQuote(context.Background(), QuoteRequest{Resource: ResourceEnergy, Amount: 32000}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.quotes != 1 {
+		t.Fatalf("provider was quoted %d times, want 1 (cached)", p.quotes)
+	}
+}
+
+func TestFeeMode(t *testing.T) {
+	if got := FeeMode("trx_burn"); got != FeeModeBurn {
+		t.Fatalf("got %s, want %s", got, FeeModeBurn)
+	}
+	if got := FeeMode("gasstation"); got != "rent:gasstation" {
+		t.Fatalf("got %s", got)
+	}
+}

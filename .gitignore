@@ -1,0 +1,7 @@
+bin/
+.env
+*.local.yaml
+configs/config.yaml
+*.pem
+*.key
+*.crt

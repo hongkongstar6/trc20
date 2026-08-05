@@ -5,3 +5,4 @@ configs/config.yaml
 *.pem
 *.key
 *.crt
+etc/

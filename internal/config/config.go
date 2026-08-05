@@ -252,10 +252,21 @@ func Load(path string) (*Config, error) {
 	}
 	expanded := envPattern.ReplaceAllStringFunc(string(raw), func(m string) string {
 		g := envPattern.FindStringSubmatch(m)
-		if v, ok := os.LookupEnv(g[1]); ok {
+		v, ok := os.LookupEnv(g[1])
+		// ${VAR:-default} follows POSIX semantics: the default applies when the
+		// variable is unset OR set to the empty string, so an exported but empty
+		// MYSQL_DSN=... still falls back instead of tripping validation.
+		if g[2] != "" {
+			if !ok || v == "" {
+				return g[3]
+			}
 			return v
 		}
-		return g[3]
+		// ${VAR} has no default: expand to the value or empty.
+		if ok {
+			return v
+		}
+		return ""
 	})
 	var c Config
 	if err := yaml.Unmarshal([]byte(expanded), &c); err != nil {

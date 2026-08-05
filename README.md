@@ -56,9 +56,13 @@ docker compose up --build api scanner withdraw sweep sign
 
 对于已存在的数据库，请手动应用该文件，或运行
 
-`make migrate` 以使用 GORM `AutoMigrate`（仅限开发环境：生产环境应
+`make migrate` 以使用 GORM `AutoMigrate`。
 
-应用已审核的 SQL，以确保索引更改可见）。
+SQL 文件是权威 schema，`AutoMigrate` 仅用于开发环境：两者的列和
+
+全部唯一索引一致，但 `AutoMigrate` 会把生产 SQL 中声明为 `NOT NULL` 的列
+
+建成可为 NULL，因此由它建出的库会接受生产环境拒绝的数据。
 
 不使用 Docker：
 

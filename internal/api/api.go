@@ -163,8 +163,14 @@ func (s *Server) createAddress(c *gin.Context) {
 		return
 	}
 	wallet := model.Wallet{
-		UID: req.UID, Chain: "TRON", ChainIdx: "TRON", Address: address,
-		AddrIndex: index, DerivePath: path, Purpose: "deposit", Status: 1,
+		UID:        req.UID,
+		Chain:      "TRON",
+		ChainIdx:   "TRON",
+		Address:    address,
+		AddrIndex:  index,
+		DerivePath: path,
+		Purpose:    "deposit",
+		Status:     1,
 	}
 	if err := s.st.DB.WithContext(c).Create(&wallet).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

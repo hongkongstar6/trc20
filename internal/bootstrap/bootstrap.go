@@ -33,7 +33,7 @@ type App struct {
 
 // Init loads the config, opens the datastores and builds the chain gateway.
 func Init(service string) (*App, error) {
-	path := flag.String("config", envOr("CONFIG_PATH", "configs/config.yaml"), "path to the config file")
+	path := flag.String("config", envOr("CONFIG_PATH", "../../configs/config.yaml"), "path to the config file")
 	migrate := flag.Bool("migrate", false, "run schema auto migration and exit")
 	flag.Parse()
 

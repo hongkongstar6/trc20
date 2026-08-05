@@ -189,8 +189,7 @@ type createWithdrawRequest struct {
 	Amount     string `json:"amount" binding:"required"` // minimum units
 }
 
-// createWithdraw records the order. Uniqueness of biz_order_no is what makes a
-// retried submission safe: the same order can never pay out twice.
+// createWithdraw 会记录订单,biz_order_no 的唯一性保证了重试提交的安全性：// 同一订单永远不会被支付两次。
 func (s *Server) createWithdraw(c *gin.Context) {
 	var req createWithdrawRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -218,9 +217,15 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		return
 	}
 	row := model.WithdrawRecord{
-		BizOrderNo: req.BizOrderNo, UID: req.UID, Chain: "TRON", Symbol: token.Symbol,
-		Contract: token.Contract, ToAddress: req.ToAddress, AmountUnits: amount.String(),
-		Decimals: token.Decimals, Status: model.WithdrawStateCreated,
+		BizOrderNo:  req.BizOrderNo,
+		UID:         req.UID,
+		Chain:       "TRON",
+		Symbol:      token.Symbol,
+		Contract:    token.Contract,
+		ToAddress:   req.ToAddress,
+		AmountUnits: amount.String(),
+		Decimals:    token.Decimals,
+		Status:      model.WithdrawStateCreated,
 		FromAddress: s.cfg.Wallet.HotWallet.Address,
 	}
 	if err := s.st.DB.WithContext(c).Create(&row).Error; err != nil {

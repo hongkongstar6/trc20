@@ -1,4 +1,5 @@
 # trc20
+trc20-wallet-gateway
 
 Custodial USDT-TRC20 wallet gateway: address generation, deposit scanning and
 confirmation, event delivery, withdrawal signing and broadcasting, sweeping to
@@ -128,3 +129,15 @@ and outbox signing.
 
 Not yet verified: an end-to-end run on Nile against a live node and database,
 and the mainnet grayscale validation of GasStation and TronEnergyRent.
+=======
+设计并开发基于 TRON（TRC20）网络的 USDT 托管钱包系统，实现用户专属充值地址分配、链上充值监听、资金归集（Sweep）、提现签名、账本管理等核心功能。采用 HD Wallet（BIP39/BIP32/BIP44）统一管理钱包体系，实现交易所钱包模式的资金管理方案。
+
+平台统一管理钱包私钥
+使用 HD Wallet（BIP39 + BIP32 + BIP44）批量生成用户专属充值地址
+每个用户拥有唯一 TRON 地址
+监听 TRON 公链上的 USDT-TRC20 转账
+自动识别用户充值
+生成充值流水并通知业务系统
+用户提现时，由平台签名并广播交易
+支持资金归集（Sweep），将用户地址资金归集到平台财务地址
+

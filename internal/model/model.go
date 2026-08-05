@@ -74,13 +74,13 @@ type DepositRecord struct {
 	Symbol        string     `gorm:"size:16" json:"symbol"`
 	Contract      string     `gorm:"size:64" json:"contract"`
 	TxID          string     `gorm:"column:txid;size:70;uniqueIndex:uq_tx_event,priority:1" json:"txid"`
-	EventIndex    int        `gorm:"uniqueIndex:uq_tx_event,priority:2" json:"event_index"`
+	EventIndex    int        `gorm:"size:32;uniqueIndex:uq_tx_event,priority:2" json:"event_index"`
 	BlockNumber   int64      `gorm:"index" json:"block_number"`
 	BlockHash     string     `gorm:"size:70" json:"block_hash"`
 	FromAddress   string     `gorm:"size:64" json:"from_address"`
 	ToAddress     string     `gorm:"size:64;index" json:"to_address"`
 	AmountUnits   string     `gorm:"type:decimal(38,0)" json:"amount_units"`
-	Decimals      int        `json:"decimals"`
+	Decimals      int        `gorm:"size:32" json:"decimals"`
 	Confirmations int64      `json:"confirmations"`
 	Status        string     `gorm:"size:16;index" json:"status"`
 	Internal      bool       `json:"internal"`
@@ -105,7 +105,7 @@ type WithdrawRecord struct {
 	FromAddress string `gorm:"size:64" json:"from_address"`
 	ToAddress   string `gorm:"size:64;index" json:"to_address"`
 	AmountUnits string `gorm:"type:decimal(38,0)" json:"amount_units"`
-	Decimals    int    `json:"decimals"`
+	Decimals    int    `gorm:"size:32" json:"decimals"`
 	Status      string `gorm:"size:16;index" json:"status"`
 	FailReason  string `gorm:"size:255" json:"fail_reason"`
 	TxID        string `gorm:"column:txid;size:70;index" json:"txid"`
@@ -221,7 +221,7 @@ type NotifyOutbox struct {
 	EventType  string     `gorm:"size:32;index" json:"event_type"`
 	Payload    string     `gorm:"type:text" json:"payload"`
 	Status     string     `gorm:"size:16;index" json:"status"`
-	RetryCount int        `json:"retry_count"`
+	RetryCount int        `gorm:"size:32" json:"retry_count"`
 	NextRetry  time.Time  `gorm:"index" json:"next_retry"`
 	LastError  string     `gorm:"size:255" json:"last_error"`
 	CreatedAt  time.Time  `json:"created_at"`

@@ -38,8 +38,12 @@ docker compose up --build api scanner withdraw sweep sign
 
 `docker compose` applies `deploy/migrations/0001_init.sql` on first start of the
 MySQL container. For an existing database, apply the file by hand, or run
-`make migrate` to use GORM `AutoMigrate` (development only: production should
-apply reviewed SQL so index changes stay visible).
+`make migrate` to use GORM `AutoMigrate`.
+
+The SQL file is the authoritative schema; `AutoMigrate` is for development only.
+Both agree on columns and on every unique key, but `AutoMigrate` leaves columns
+NULLable where the SQL declares `NOT NULL`, so a database built from it accepts
+rows that production rejects.
 
 Without Docker:
 

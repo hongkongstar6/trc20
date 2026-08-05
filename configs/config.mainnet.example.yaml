@@ -1,0 +1,137 @@
+# Mainnet configuration example. Only the differences from configs/config.nile.yaml
+# are commented; copy that file and apply these sections.
+#
+# Rollout order that this config assumes:
+#   1. Nile with energy.mode=fixed / trx_burn to exercise the whole flow.
+#   2. Mainnet with small amounts and one rental provider enabled.
+#   3. Mainnet with both providers and energy.mode=cheapest.
+#   4. auto_topup.enabled=true only after the topup audit trail looks right.
+env: prod
+network: mainnet
+
+log:
+  level: info
+
+api:
+  listen: ":8080"
+  hmac_secret: "${API_HMAC_SECRET}"
+  # Mainnet must pin the business system egress IPs.
+  allowed_ips:
+    - "10.0.0.11"
+  signature_skew: 5m
+  nonce_ttl: 10m
+
+sign:
+  listen: ":8090"
+  endpoint: "${SIGN_ENDPOINT}"
+  token: "${SIGN_TOKEN}"
+  # Production: the mnemonic should be injected by the secret manager, or
+  # better, replaced by a KMS/HSM/Vault Transit backed signing key.
+  mnemonic: "${WALLET_MNEMONIC}"
+  tls:
+    enabled: true
+    cert_file: /etc/wallet/tls/sign.crt
+    key_file: /etc/wallet/tls/sign.key
+    ca_file: /etc/wallet/tls/ca.crt
+    server_name: sign.internal
+
+chain:
+  # FullNode first once it is ready; TronGrid stays as the failover.
+  nodes:
+    - name: fullnode
+      type: fullnode
+      endpoint: "${FULLNODE_ENDPOINT}"
+      priority: 1
+      enabled: true
+      timeout: 10s
+    - name: trongrid
+      type: trongrid
+      endpoint: https://api.trongrid.io
+      api_key: "${TRONGRID_API_KEY}"
+      priority: 2
+      enabled: true
+      timeout: 10s
+  solidity_for_confirm: true
+  retry_per_node: 2
+  broadcast_timeout: 15s
+
+wallet:
+  account_path: "m/44'/195'/0'/0"
+  tokens:
+    - symbol: USDT
+      contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t   # mainnet USDT-TRC20
+      decimals: 6
+      enabled: true
+
+energy:
+  # Real comparison shopping across the enabled providers, burning TRX only
+  # when every rental fails.
+  mode: cheapest
+  default_period: 1h
+  providers:
+    trx_burn:
+      enabled: true
+    gasstation:
+      enabled: true
+      options:
+        base_url: https://openapi.gasstation.ai
+        app_id: "${GASSTATION_APP_ID}"
+        # GasStation also requires a fixed egress IP allowlist (error 100006).
+        app_secret: "${GASSTATION_APP_SECRET}"
+    tronenergyrent:
+      enabled: true
+      options:
+        base_url: https://api.tronenergyrent.com
+        # The key travels in the query string: make sure no proxy or access
+        # log records full URLs for this host.
+        api_key: "${TRONENERGYRENT_API_KEY}"
+  pool:
+    # ~200 withdrawals a day from one hot wallet: renting per withdrawal costs
+    # 200 orders and 200 small-order surcharges, batching costs about 20.
+    enabled: true
+    check_interval: 30s
+    low_water_txs: 3
+    batch_txs: 10
+    max_batch_txs: 30
+    period: 1h
+  auto_topup:
+    enabled: false
+    source_address: "${GAS_ACCOUNT_ADDRESS}"
+    gas_account:
+      target_trx: 20000
+      low_watermark_trx: 8000
+    providers:
+      gasstation:
+        enabled: true
+        low_watermark_trx: 2000
+        target_trx: 6000
+        max_single_topup_trx: 4000
+        max_daily_topup_trx: 8000
+        max_daily_topup_count: 3
+        # Hard whitelist. The address returned by the provider API is compared
+        # against this value before every transfer.
+        deposit_address: "${GASSTATION_DEPOSIT_ADDRESS}"
+      tronenergyrent:
+        enabled: true
+        low_watermark_trx: 2000
+        target_trx: 6000
+        max_single_topup_trx: 4000
+        max_daily_topup_trx: 8000
+        max_daily_topup_count: 3
+        deposit_address: "${TRONENERGYRENT_DEPOSIT_ADDRESS}"
+
+notify:
+  http:
+    enabled: true
+    url: "${NOTIFY_URL}"
+    secret: "${NOTIFY_SECRET}"
+    timeout: 10s
+  rocketmq:
+    enabled: true
+    name_server:
+      - "${ROCKETMQ_NAMESRV}"
+    topic: wallet_event
+    group: wallet_gateway
+  batch_size: 100
+  poll_interval: 1s
+  max_retry: 10

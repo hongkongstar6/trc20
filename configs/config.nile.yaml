@@ -1,0 +1,197 @@
+# Nile testnet configuration.
+#
+# Nile is the end-to-end rehearsal environment: neither GasStation nor
+# TronEnergyRent offers a test environment, so energy.mode is pinned to
+# trx_burn here and the rental providers are validated separately on mainnet
+# with small amounts.
+#
+# No secret belongs in this file. Every sensitive value is an ${ENV} reference.
+env: nile
+network: nile
+
+log:
+  level: info
+
+mysql:
+  dsn: "${MYSQL_DSN:-wallet:wallet@tcp(127.0.0.1:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local}"
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 30m
+
+redis:
+  addr: "${REDIS_ADDR:-127.0.0.1:6379}"
+  password: "${REDIS_PASSWORD:-}"
+  db: 0
+  prefix: "wallet:nile"
+
+api:
+  listen: ":8080"
+  hmac_secret: "${API_HMAC_SECRET}"
+  allowed_ips: []          # empty means no IP restriction; set it in production
+  signature_skew: 5m
+  nonce_ttl: 10m
+  max_body_bytes: 1048576
+
+sign:
+  # cmd/sign listens here; every other service calls it through `endpoint`.
+  listen: ":8090"
+  endpoint: "${SIGN_ENDPOINT:-http://127.0.0.1:8090}"
+  token: "${SIGN_TOKEN}"
+  mnemonic: "${WALLET_MNEMONIC}"
+  passphrase: "${WALLET_PASSPHRASE:-}"
+  tls:
+    enabled: false          # production: true, with mutual TLS
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    server_name: ""
+
+chain:
+  # Priority order: the smaller number wins, the next one is the failover.
+  # Switching from TronGrid-first to FullNode-first is a config change only.
+  nodes:
+    - name: trongrid-nile
+      type: trongrid
+      endpoint: https://nile.trongrid.io
+      api_key: "${TRONGRID_API_KEY:-}"
+      priority: 1
+      enabled: true
+      timeout: 10s
+    - name: fullnode
+      type: fullnode
+      endpoint: "${FULLNODE_ENDPOINT:-http://127.0.0.1:8090}"
+      priority: 2
+      enabled: false
+      timeout: 10s
+  solidity_for_confirm: false
+  retry_per_node: 2
+  broadcast_timeout: 15s
+
+wallet:
+  account_path: "m/44'/195'/0'/0"
+  tokens:
+    - symbol: USDT
+      # Nile USDT (TRC20). Verify before use: a wrong contract means either
+      # missed deposits or credited fake tokens.
+      contract: "${USDT_CONTRACT:-TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf}"
+      decimals: 6
+      enabled: true
+  hot_wallet:
+    address: "${HOT_WALLET_ADDRESS}"
+    path: "m/44'/195'/1'/0/0"
+  finance_wallet:
+    address: "${FINANCE_WALLET_ADDRESS}"
+    path: "m/44'/195'/2'/0/0"
+  gas_account:
+    address: "${GAS_ACCOUNT_ADDRESS}"
+    path: "m/44'/195'/3'/0/0"
+
+deposit:
+  start_block: 0            # 0 means start from the current head
+  batch_blocks: 20
+  confirmations: 19         # TRON finality is ~19 blocks (SR round)
+  poll_interval: 3s
+  reorg_depth: 60
+  min_deposit_units: "10000"   # 0.01 USDT dust filter
+
+withdraw:
+  enabled: true
+  poll_interval: 3s
+  fee_limit_sun: 40000000   # 40 TRX ceiling, only spent when energy is short
+  tx_expiration_sec: 60
+  max_amount_units: "50000000000"     # 50,000 USDT per order
+  daily_max_units: "500000000000"     # 500,000 USDT per day
+  confirm_blocks: 19
+  address_blacklist: []
+
+sweep:
+  enabled: true
+  interval: 5m
+  fee_limit_sun: 40000000
+  max_per_round: 50
+  lock_ttl: 10m
+  threshold:
+    # min_sweep is computed at runtime, never hard coded:
+    #   cost_usd  = (energy quote + bandwidth burn) * TRX/USD
+    #   min_sweep = max(cost_usd / target_cost_ratio, cost_usd * safety_multiple)
+    target_cost_ratio: 0.005
+    safety_multiple: 20
+    min_usdt: 50
+    max_usdt: 500
+    refresh_interval: 10m
+    trx_price_usd: 0          # 0 means read trx_price_url
+    trx_price_url: "https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=usd"
+    stale_days: 14
+
+energy:
+  # Nile: rental platforms have no test environment, so burn TRX.
+  mode: fixed
+  fixed: trx_burn
+  quote_cache_ttl: 45s
+  default_period: 1h
+  energy_per_tx: 32000        # recipient already holds USDT
+  energy_per_tx_new: 65000    # recipient never held USDT: roughly double
+  wait_timeout: 90s
+  providers:
+    trx_burn:
+      enabled: true
+      options:
+        energy_fee_sun: "100"   # refreshed from getEnergyFee at runtime
+    gasstation:
+      enabled: false
+      options:
+        base_url: https://openapi.gasstation.ai
+        app_id: "${GASSTATION_APP_ID:-}"
+        app_secret: "${GASSTATION_APP_SECRET:-}"
+    tronenergyrent:
+      enabled: false
+      options:
+        base_url: https://api.tronenergyrent.com
+        api_key: "${TRONENERGYRENT_API_KEY:-}"
+  pool:
+    enabled: false            # mainnet only: it rents real energy
+    check_interval: 30s
+    low_water_txs: 3
+    batch_txs: 10
+    max_batch_txs: 30
+    period: 1h
+  auto_topup:
+    enabled: false            # master switch, off means alert only
+    source_address: "${GAS_ACCOUNT_ADDRESS}"
+    check_interval: 5m
+    gas_account:
+      target_trx: 20000
+      low_watermark_trx: 8000   # alert only: refilled manually from finance
+    providers:
+      gasstation:
+        enabled: false
+        low_watermark_trx: 2000
+        target_trx: 6000
+        max_single_topup_trx: 4000
+        max_daily_topup_trx: 8000
+        max_daily_topup_count: 3
+        deposit_address: "${GASSTATION_DEPOSIT_ADDRESS:-}"
+      tronenergyrent:
+        enabled: false
+        low_watermark_trx: 2000
+        target_trx: 6000
+        max_single_topup_trx: 4000
+        max_daily_topup_trx: 8000
+        max_daily_topup_count: 3
+        deposit_address: "${TRONENERGYRENT_DEPOSIT_ADDRESS:-}"
+
+notify:
+  http:
+    enabled: true
+    url: "${NOTIFY_URL:-http://127.0.0.1:9000/wallet/callback}"
+    secret: "${NOTIFY_SECRET}"
+    timeout: 10s
+  rocketmq:
+    enabled: false
+    name_server:
+      - "${ROCKETMQ_NAMESRV:-127.0.0.1:9876}"
+    topic: wallet_event
+    group: wallet_gateway
+  batch_size: 100
+  poll_interval: 1s
+  max_retry: 10

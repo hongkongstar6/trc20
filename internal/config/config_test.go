@@ -95,6 +95,27 @@ chain:
 	}
 }
 
+// An exported but empty variable must still fall back to the ${VAR:-default}
+// value, matching POSIX semantics; otherwise an empty MYSQL_DSN=... in the
+// environment silently blanks the dsn and trips "mysql.dsn is required".
+func TestLoadEmptyEnvFallsBackToDefault(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "")
+	cfg, err := Load(writeConfig(t, `
+mysql:
+  dsn: "${MYSQL_DSN:-user:pass@tcp(127.0.0.1:3306)/wallet}"
+chain:
+  nodes:
+    - name: fullnode
+      enabled: true
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MySQL.DSN != "user:pass@tcp(127.0.0.1:3306)/wallet" {
+		t.Fatalf("dsn = %q, want the inline default", cfg.MySQL.DSN)
+	}
+}
+
 func TestValidateRequiresAnEnabledNode(t *testing.T) {
 	_, err := Load(writeConfig(t, `
 mysql:

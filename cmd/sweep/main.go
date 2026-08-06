@@ -10,6 +10,8 @@ import (
 	"github.com/hongkongstar6/trc20/internal/sweep"
 )
 
+//归集
+
 func main() {
 	app, err := bootstrap.Init("sweep-service")
 	if err != nil {

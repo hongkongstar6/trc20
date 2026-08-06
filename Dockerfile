@@ -1,24 +1,21 @@
 # Multi-stage build producing one image with all five entrypoints. Which one
 # runs is decided by the container command, so every service shares the same
 # audited artifact.
-FROM golang:1.24-alpine AS build
-WORKDIR /src
-RUN apk add --no-cache git
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api      ./cmd/api \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/scanner  ./cmd/scanner \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/withdraw ./cmd/withdraw \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/sweep    ./cmd/sweep \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/sign     ./cmd/sign
-
+# Multi-stage build producing one image with all five entrypoints.
 FROM alpine:3.20
+
 RUN apk add --no-cache ca-certificates tzdata \
- && adduser -D -u 10001 wallet
+    && adduser -D -u 10001 wallet
+
 WORKDIR /app
-COPY --from=build /out/ /app/
-COPY configs/ /app/configs/
+
+# 显式将文件所有权赋予 wallet 用户
+COPY --chown=wallet:wallet bin/ /app/
+COPY --chown=wallet:wallet configs/ /app/configs/
+
+# 确保二进制文件具备可执行权限
+RUN chmod +x /app/*
+
 USER wallet
-ENV CONFIG_PATH=/app/configs/config.yaml
+
 ENTRYPOINT ["/app/api"]

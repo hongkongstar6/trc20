@@ -41,7 +41,7 @@ const (
 // derivation path, which is meaningless without the seed held by sign-service.
 type Wallet struct {
 	ID         int64     `gorm:"primaryKey" json:"id"`
-	UID        int64     `gorm:"column:uid;index" json:"uid"`
+	UID        string    `gorm:"column:uid;index" json:"uid"`
 	Chain      string    `gorm:"size:16" json:"chain"`
 	Address    string    `gorm:"size:64;uniqueIndex" json:"address"`
 	AddrIndex  int64     `gorm:"column:addr_index;uniqueIndex:uq_chain_index,priority:2" json:"addr_index"`
@@ -69,7 +69,7 @@ func (WalletIndexAllocator) TableName() string { return "wallet_index_allocator"
 // Uniqueness is (txid, event_index), which is also the downstream event id.
 type DepositRecord struct {
 	ID            int64      `gorm:"primaryKey" json:"id"`
-	UID           int64      `gorm:"column:uid;index" json:"uid"`
+	UID           string     `gorm:"column:uid;index" json:"uid"`
 	Chain         string     `gorm:"size:16" json:"chain"`
 	Symbol        string     `gorm:"size:16" json:"symbol"`
 	Contract      string     `gorm:"size:64" json:"contract"`
@@ -249,8 +249,16 @@ func (SignAudit) TableName() string { return "sign_audit" }
 // AllModels is used by the migration helper.
 func AllModels() []any {
 	return []any{
-		&Wallet{}, &WalletIndexAllocator{}, &DepositRecord{}, &WithdrawRecord{},
-		&SweepRecord{}, &EnergyRentOrder{}, &TopupRecord{}, &ChainCursor{},
-		&BlockSnapshot{}, &NotifyOutbox{}, &SignAudit{},
+		&Wallet{},
+		&WalletIndexAllocator{},
+		&DepositRecord{},
+		&WithdrawRecord{},
+		&SweepRecord{},
+		&EnergyRentOrder{},
+		&TopupRecord{},
+		&ChainCursor{},
+		&BlockSnapshot{},
+		&NotifyOutbox{},
+		&SignAudit{},
 	}
 }

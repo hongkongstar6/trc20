@@ -45,7 +45,7 @@ services:
     networks: [wallet]
 
   sign:
-    build: .
+    image: wallet:v1
     entrypoint: ["/app/sign"]
     environment: &env
       CONFIG_PATH: /app/configs/config.nile.yaml
@@ -68,7 +68,7 @@ services:
     networks: [wallet]
 
   api:
-    build: .
+    image: wallet:v1
     entrypoint: ["/bin/sh", "-c", "/app/api -migrate && exec /app/api"]
     environment: *env
     ports: ["8080:8080"]
@@ -77,21 +77,21 @@ services:
     networks: [wallet]
 
   scanner:
-    build: .
+    image: wallet:v1
     entrypoint: ["/app/scanner"]
     environment: *env
     depends_on: [api]
     networks: [wallet]
 
   withdraw:
-    build: .
+    image: wallet:v1
     entrypoint: ["/app/withdraw"]
     environment: *env
     depends_on: [api, sign]
     networks: [wallet]
 
   sweep:
-    build: .
+    image: wallet:v1
     entrypoint: ["/app/sweep"]
     environment: *env
     depends_on: [api, sign]

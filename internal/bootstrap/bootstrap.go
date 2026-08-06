@@ -42,7 +42,7 @@ func Init(service string) (*App, error) {
 		return nil, err
 	}
 	log := logx.New(cfg.Log.Level, service)
-	st, err := store.Open(cfg)
+	st, err := store.Open(cfg) //数据库
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func Init(service string) (*App, error) {
 			return nil, err
 		}
 		log.Info("schema migrated")
-		os.Exit(0)
+		//os.Exit(0)
 	}
 	gw, err := chain.NewGateway(cfg.Chain)
 	if err != nil {

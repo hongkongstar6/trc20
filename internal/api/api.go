@@ -128,7 +128,7 @@ func (s *Server) authenticate() gin.HandlerFunc {
 // ------------------------------------------------------------------ addresses
 
 type createAddressRequest struct {
-	UID int64 `json:"uid" binding:"required"`
+	UID string `json:"uid" binding:"required"`
 }
 
 // createAddress allocates one deposit address per uid. The derivation index
@@ -157,6 +157,7 @@ func (s *Server) createAddress(c *gin.Context) {
 		return
 	}
 	path := hd.AddressPath(s.cfg.Wallet.AccountPath, index)
+
 	address, err := s.sign.DeriveAddress(c, path)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "derive failed: " + err.Error()})

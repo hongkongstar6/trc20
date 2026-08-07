@@ -17,6 +17,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
+	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/hd"
 	"github.com/hongkongstar6/trc20/internal/model"
@@ -27,14 +28,19 @@ import (
 )
 
 type Server struct {
-	cfg  *config.Config
+	//cfg  *config.Config
 	st   *store.Store
 	sign *signer.Client
-	log  *logrus.Logger
+	//log  *logrus.Logger
 }
 
 func New(cfg *config.Config, st *store.Store, sign *signer.Client, log *logrus.Logger) *Server {
-	return &Server{cfg: cfg, st: st, sign: sign, log: log}
+	return &Server{
+		//cfg:  cfg,
+		st:   st,
+		sign: sign,
+		//log: log
+	}
 }
 
 func (s *Server) Router() *gin.Engine {
@@ -56,7 +62,7 @@ func (s *Server) requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		s.log.Info("http",
+		logrus.Info("http",
 			"method", c.Request.Method, "path", c.FullPath(),
 			"status", c.Writer.Status(), "cost_ms", time.Since(start).Milliseconds())
 	}
@@ -64,7 +70,7 @@ func (s *Server) requestLogger() gin.HandlerFunc {
 
 func (s *Server) ipAllowlist() gin.HandlerFunc {
 	allowed := map[string]bool{}
-	for _, ip := range s.cfg.API.AllowedIPs {
+	for _, ip := range bootstrap.Cfg.API.AllowedIPs {
 		allowed[ip] = true
 	}
 	return func(c *gin.Context) {
@@ -82,14 +88,14 @@ func (s *Server) ipAllowlist() gin.HandlerFunc {
 
 // authenticate verifies HMAC(timestamp + body) and rejects replays.
 func (s *Server) authenticate() gin.HandlerFunc {
-	skew := config.Duration(s.cfg.API.SignatureSkew, 5*time.Minute)
-	nonceTTL := config.Duration(s.cfg.API.NonceTTL, 10*time.Minute)
-	maxBody := s.cfg.API.MaxBodyBytes
+	skew := config.Duration(bootstrap.Cfg.API.SignatureSkew, 5*time.Minute)
+	nonceTTL := config.Duration(bootstrap.Cfg.API.NonceTTL, 10*time.Minute)
+	maxBody := bootstrap.Cfg.API.MaxBodyBytes
 	if maxBody <= 0 {
 		maxBody = 1 << 20
 	}
 	return func(c *gin.Context) {
-		if s.cfg.API.HMACSecret == "" {
+		if bootstrap.Cfg.API.HMACSecret == "" {
 			c.Next()
 			return
 		}
@@ -108,7 +114,7 @@ func (s *Server) authenticate() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "stale timestamp"})
 			return
 		}
-		expected := outbox.Sign(s.cfg.API.HMACSecret, ts, body)
+		expected := outbox.Sign(bootstrap.Cfg.API.HMACSecret, ts, body)
 		if !hmac.Equal([]byte(expected), []byte(sig)) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "bad signature"})
 			return
@@ -156,7 +162,7 @@ func (s *Server) createAddress(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	path := hd.AddressPath(s.cfg.Wallet.AccountPath, index)
+	path := hd.AddressPath(bootstrap.Cfg.Wallet.AccountPath, index)
 
 	address, err := s.sign.DeriveAddress(c, path)
 	if err != nil {
@@ -207,9 +213,9 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		return
 	}
 	var token *config.TokenConfig
-	for i := range s.cfg.Wallet.Tokens {
-		if s.cfg.Wallet.Tokens[i].Enabled && s.cfg.Wallet.Tokens[i].Symbol == req.Symbol {
-			token = &s.cfg.Wallet.Tokens[i]
+	for i := range bootstrap.Cfg.Wallet.Tokens {
+		if bootstrap.Cfg.Wallet.Tokens[i].Enabled && bootstrap.Cfg.Wallet.Tokens[i].Symbol == req.Symbol {
+			token = &bootstrap.Cfg.Wallet.Tokens[i]
 			break
 		}
 	}
@@ -227,7 +233,7 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		AmountUnits: amount.String(),
 		Decimals:    token.Decimals,
 		Status:      model.WithdrawStateCreated,
-		FromAddress: s.cfg.Wallet.HotWallet.Address,
+		FromAddress: bootstrap.Cfg.Wallet.HotWallet.Address,
 	}
 	if err := s.st.DB.WithContext(c).Create(&row).Error; err != nil {
 		// Duplicate submission: return the existing order instead of failing.

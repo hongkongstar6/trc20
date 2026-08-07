@@ -8,6 +8,7 @@ import (
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/scanner"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -20,10 +21,10 @@ func main() {
 	ctx, stop := bootstrap.Context()
 	defer stop()
 
-	s := scanner.New(app.Cfg, app.Store, app.Gateway, app.Log)
-	app.Log.Info("deposit scanner starting",
-		"confirmations", app.Cfg.Deposit.Confirmations, "batch_blocks", app.Cfg.Deposit.BatchBlocks)
+	s := scanner.New(app.Store, app.Gateway)
+	logrus.Info("deposit scanner starting",
+		"confirmations", bootstrap.Cfg.Deposit.Confirmations, "batch_blocks", bootstrap.Cfg.Deposit.BatchBlocks)
 	if err := s.Run(ctx); err != nil {
-		app.Log.Error("scanner stopped", "err", err)
+		logrus.Error("scanner stopped", "err", err)
 	}
 }

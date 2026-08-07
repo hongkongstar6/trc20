@@ -10,6 +10,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/energy"
 	"github.com/hongkongstar6/trc20/internal/sweep"
+	"github.com/sirupsen/logrus"
 )
 
 //归集
@@ -27,32 +28,32 @@ func main() {
 
 	signClient, err := app.SignerClient()
 	if err != nil {
-		app.Log.Error("sign client init failed", "err", err)
+		logrus.Error("sign client init failed", "err", err)
 		return
 	}
 	mgr, err := app.EnergyManager()
 	if err != nil {
-		app.Log.Error("energy manager init failed", "err", err)
+		logrus.Error("energy manager init failed", "err", err)
 		return
 	}
-	pricer := energy.NewPricer(app.Cfg.Sweep.Threshold, app.Cfg.Energy, mgr, app.Gateway, app.Log)
+	pricer := energy.NewPricer(bootstrap.Cfg.Sweep.Threshold, bootstrap.Cfg.Energy, mgr, app.Gateway, nil)
 	go func() {
 		if err := pricer.Run(ctx); err != nil {
-			app.Log.Error("pricer stopped", "err", err)
+			logrus.Error("pricer stopped", "err", err)
 		}
 	}()
 
-	topup := energy.NewTopup(app.Cfg.Energy.AutoTopup, app.Store, app.Gateway, signClient, app.Log,
-		mgr.Providers(), app.Cfg.Wallet.GasAccount.Path)
+	topup := energy.NewTopup(bootstrap.Cfg.Energy.AutoTopup, app.Store, app.Gateway, signClient, nil,
+		mgr.Providers(), bootstrap.Cfg.Wallet.GasAccount.Path)
 	go func() {
 		if err := topup.Run(ctx); err != nil {
-			app.Log.Error("topup loop stopped", "err", err)
+			logrus.Error("topup loop stopped", "err", err)
 		}
 	}()
 
-	svc, err := sweep.New(app.Cfg, app.Store, app.Gateway, signClient, mgr, pricer, app.Log)
+	svc, err := sweep.New(app.Store, app.Gateway, signClient, mgr, pricer, nil)
 	if err != nil {
-		app.Log.Error("sweep init failed", "err", err)
+		logrus.Error("sweep init failed", "err", err)
 		return
 	}
 	go func() {
@@ -64,16 +65,16 @@ func main() {
 				return
 			case <-ticker.C:
 				if err := svc.Reconcile(ctx); err != nil {
-					app.Log.Error("sweep reconcile failed", "err", err)
+					logrus.Error("sweep reconcile failed", "err", err)
 				}
 				if err := topup.Reconcile(ctx); err != nil {
-					app.Log.Error("topup reconcile failed", "err", err)
+					logrus.Error("topup reconcile failed", "err", err)
 				}
 			}
 		}
 	}()
 
 	if err := svc.Run(ctx); err != nil {
-		app.Log.Error("sweep stopped", "err", err)
+		logrus.Error("sweep stopped", "err", err)
 	}
 }

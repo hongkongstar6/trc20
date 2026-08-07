@@ -24,10 +24,10 @@ const FeeModeBurn = "burn"
 // Manager selects a provider, places the rental and waits for delegation.
 // Callers never talk to a provider directly.
 type Manager struct {
-	cfg   config.EnergyConfig
-	st    *store.Store
-	gw    *chain.Gateway
-	log   *logrus.Logger
+	cfg config.EnergyConfig
+	st  *store.Store
+	gw  *chain.Gateway
+	//log   *logrus.Logger
 	provs map[string]Provider
 
 	mu     sync.Mutex
@@ -40,7 +40,9 @@ type cachedQuote struct {
 }
 
 func NewManager(cfg config.EnergyConfig, st *store.Store, gw *chain.Gateway, log *logrus.Logger, provs map[string]Provider) *Manager {
-	return &Manager{cfg: cfg, st: st, gw: gw, log: log, provs: provs, quotes: map[string]cachedQuote{}}
+	return &Manager{cfg: cfg, st: st, gw: gw,
+		//log: log,
+		provs: provs, quotes: map[string]cachedQuote{}}
 }
 
 func (m *Manager) Providers() map[string]Provider { return m.provs }
@@ -223,7 +225,7 @@ func (m *Manager) wait(ctx context.Context, provider Provider, row *model.Energy
 	for time.Now().Before(deadline) {
 		order, err := provider.Poll(ctx, pollKey)
 		if err != nil {
-			m.log.Warn("poll energy order failed", "provider", provider.Name(), "order", pollKey, "err", err)
+			logrus.Warn("poll energy order failed", "provider", provider.Name(), "order", pollKey, "err", err)
 		} else {
 			last = order
 			switch order.State {
@@ -280,7 +282,7 @@ func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder,
 	}
 	if err := m.st.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
 		Where("id = ?", row.ID).UpdateColumns(updates).Error; err != nil {
-		m.log.Error("update energy order failed", "id", row.ID, "err", err)
+		logrus.Error("update energy order failed", "id", row.ID, "err", err)
 	}
 	row.Status = model.EnergyOrderDelegated
 }

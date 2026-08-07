@@ -30,17 +30,17 @@ import (
 //   - only one refill runs at a time, and a previous unsettled refill blocks the
 //     next one, because provider crediting lags the on-chain confirmation.
 type Topup struct {
-	cfg     config.AutoTopupConfig
-	st      *store.Store
-	gw      *chain.Gateway
-	signer  *signer.Client
-	log     *logrus.Logger
+	cfg    config.AutoTopupConfig
+	st     *store.Store
+	gw     *chain.Gateway
+	signer *signer.Client
+	//log     *logrus.Logger
 	provs   map[string]Provider
 	gasPath string
 }
 
 func NewTopup(cfg config.AutoTopupConfig, st *store.Store, gw *chain.Gateway, sign *signer.Client, log *logrus.Logger, provs map[string]Provider, gasPath string) *Topup {
-	return &Topup{cfg: cfg, st: st, gw: gw, signer: sign, log: log, provs: provs, gasPath: gasPath}
+	return &Topup{cfg: cfg, st: st, gw: gw, signer: sign, provs: provs, gasPath: gasPath}
 }
 
 func (t *Topup) Run(ctx context.Context) error {
@@ -49,7 +49,7 @@ func (t *Topup) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		if err := t.check(ctx); err != nil {
-			t.log.Error("provider balance check failed", "err", err)
+			logrus.Error("provider balance check failed", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -68,7 +68,7 @@ func (t *Topup) check(ctx context.Context) error {
 		}
 		balance, depositAddr, err := prov.Balance(ctx)
 		if err != nil {
-			t.log.Error("provider balance query failed", "provider", name, "err", err)
+			logrus.Error("provider balance query failed", "provider", name, "err", err)
 			continue
 		}
 		if balance >= conf.LowWatermarkTRX {
@@ -76,12 +76,12 @@ func (t *Topup) check(ctx context.Context) error {
 		}
 		if !t.cfg.Enabled {
 			// Alert only: the switch is the operator's kill switch.
-			t.log.Warn("provider prepaid balance low, auto topup disabled",
+			logrus.Warn("provider prepaid balance low, auto topup disabled",
 				"provider", name, "balance_trx", balance, "low_watermark_trx", conf.LowWatermarkTRX)
 			continue
 		}
 		if err := t.refill(ctx, name, conf, balance, depositAddr); err != nil {
-			t.log.Error("provider topup failed", "provider", name, "err", err)
+			logrus.Error("provider topup failed", "provider", name, "err", err)
 		}
 	}
 	return nil
@@ -96,12 +96,12 @@ func (t *Topup) checkGasAccount(ctx context.Context) {
 	}
 	sun, err := t.gw.GetTRXBalance(ctx, t.cfg.SourceAddress)
 	if err != nil {
-		t.log.Error("gas account balance query failed", "err", err)
+		logrus.Error("gas account balance query failed", "err", err)
 		return
 	}
 	trx := float64(sun) / 1e6
 	if t.cfg.GasAccount.LowWatermarkTRX > 0 && trx < t.cfg.GasAccount.LowWatermarkTRX {
-		t.log.Warn("gas account balance low, manual refill from the finance wallet required",
+		logrus.Warn("gas account balance low, manual refill from the finance wallet required",
 			"balance_trx", trx, "low_watermark_trx", t.cfg.GasAccount.LowWatermarkTRX,
 			"target_trx", t.cfg.GasAccount.TargetTRX)
 	}
@@ -178,7 +178,7 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 	t.st.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
 		"txid": res.TxID, "status": model.TopupStateBroadcast, "updated_at": time.Now(),
 	})
-	t.log.Warn("provider prepaid balance topped up automatically",
+	logrus.Warn("provider prepaid balance topped up automatically",
 		"provider", provider, "amount_trx", amount, "balance_trx", balance, "txid", res.TxID)
 	return nil
 }

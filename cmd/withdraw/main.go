@@ -8,6 +8,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/energy"
 	"github.com/hongkongstar6/trc20/internal/withdraw"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -22,27 +23,27 @@ func main() {
 
 	signClient, err := app.SignerClient()
 	if err != nil {
-		app.Log.Error("sign client init failed", "err", err)
+		logrus.Error("sign client init failed", "err", err)
 		return
 	}
 	mgr, err := app.EnergyManager()
 	if err != nil {
-		app.Log.Error("energy manager init failed", "err", err)
+		logrus.Error("energy manager init failed", "err", err)
 		return
 	}
-	pool := energy.NewPool(app.Cfg.Energy, mgr, app.Gateway, app.Log, app.Cfg.Wallet.HotWallet.Address)
+	pool := energy.NewPool(bootstrap.Cfg.Energy, mgr, app.Gateway, nil, bootstrap.Cfg.Wallet.HotWallet.Address)
 	go func() {
 		if err := pool.Run(ctx); err != nil {
-			app.Log.Error("energy pool stopped", "err", err)
+			logrus.Error("energy pool stopped", "err", err)
 		}
 	}()
 
-	worker, err := withdraw.New(app.Cfg, app.Store, app.Gateway, signClient, mgr, pool, app.Log)
+	worker, err := withdraw.New(app.Store, app.Gateway, signClient, mgr, pool, nil)
 	if err != nil {
-		app.Log.Error("withdraw worker init failed", "err", err)
+		logrus.Error("withdraw worker init failed", "err", err)
 		return
 	}
 	if err := worker.Run(ctx); err != nil {
-		app.Log.Error("withdraw worker stopped", "err", err)
+		logrus.Error("withdraw worker stopped", "err", err)
 	}
 }

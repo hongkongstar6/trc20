@@ -13,6 +13,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/energy"
@@ -24,19 +25,19 @@ import (
 )
 
 type Worker struct {
-	cfg   *config.Config
-	st    *store.Store
-	gw    *chain.Gateway
-	sign  *signer.Client
-	mgr   *energy.Manager
-	pool  *energy.Pool
-	log   *logrus.Logger
+	//cfg  *config.Config
+	st   *store.Store
+	gw   *chain.Gateway
+	sign *signer.Client
+	mgr  *energy.Manager
+	pool *energy.Pool
+	//log   *logrus.Logger
 	token config.TokenConfig
 }
 
-func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pool *energy.Pool, log *logrus.Logger) (*Worker, error) {
+func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pool *energy.Pool, log *logrus.Logger) (*Worker, error) {
 	var token config.TokenConfig
-	for _, t := range cfg.Wallet.Tokens {
+	for _, t := range bootstrap.Cfg.Wallet.Tokens {
 		if t.Enabled {
 			token = t
 			break
@@ -45,27 +46,28 @@ func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, sign *signer.Cl
 	if token.Contract == "" {
 		return nil, errors.New("withdraw: no enabled token configured")
 	}
-	if cfg.Wallet.HotWallet.Address == "" || cfg.Wallet.HotWallet.Path == "" {
+	if bootstrap.Cfg.Wallet.HotWallet.Address == "" || bootstrap.Cfg.Wallet.HotWallet.Path == "" {
 		return nil, errors.New("withdraw: wallet.hot_wallet address and path are required")
 	}
-	return &Worker{cfg: cfg, st: st, gw: gw, sign: sign, mgr: mgr, pool: pool, log: log, token: token}, nil
+	return &Worker{st: st, gw: gw, sign: sign, mgr: mgr, pool: pool, //log: log,
+		token: token}, nil
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	if !w.cfg.Withdraw.Enabled {
-		w.log.Info("withdraw disabled")
+	if !bootstrap.Cfg.Withdraw.Enabled {
+		logrus.Info("withdraw disabled")
 		<-ctx.Done()
 		return nil
 	}
-	interval := config.Duration(w.cfg.Withdraw.PollInterval, 3*time.Second)
+	interval := config.Duration(bootstrap.Cfg.Withdraw.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		if err := w.processCreated(ctx); err != nil {
-			w.log.Error("withdraw process failed", "err", err)
+			logrus.Error("withdraw process failed", "err", err)
 		}
 		if err := w.Reconcile(ctx); err != nil {
-			w.log.Error("withdraw reconcile failed", "err", err)
+			logrus.Error("withdraw reconcile failed", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -86,7 +88,7 @@ func (w *Worker) processCreated(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.execute(ctx, &row); err != nil {
-			w.log.Error("withdraw execute failed", "biz_order_no", row.BizOrderNo, "err", err)
+			logrus.Error("withdraw execute failed", "biz_order_no", row.BizOrderNo, "err", err)
 		}
 	}
 	return nil
@@ -109,7 +111,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	if !ok || amount.Sign() <= 0 {
 		return w.reject(ctx, row, "invalid amount")
 	}
-	hot := w.cfg.Wallet.HotWallet
+	hot := bootstrap.Cfg.Wallet.HotWallet
 	data, err := tron.EncodeTRC20Transfer(row.ToAddress, amount)
 	if err != nil {
 		return w.reject(ctx, row, "invalid destination")
@@ -120,18 +122,18 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	// fails the transaction with OUT_OF_ENERGY while still paying the fee.
 	need, err := w.mgr.EstimateEnergy(ctx, hot.Address, w.token.Contract, data)
 	if err != nil {
-		w.log.Warn("withdraw energy estimate failed, using worst case", "err", err)
-		need = w.cfg.Energy.EnergyPerTxNew
+		logrus.Warn("withdraw energy estimate failed, using worst case", "err", err)
+		need = bootstrap.Cfg.Energy.EnergyPerTxNew
 	}
 	if w.pool != nil && !w.pool.HasEnergyFor(ctx, need) {
 		requestID := fmt.Sprintf("withdraw-%d", row.ID)
 		if _, err := w.mgr.Acquire(ctx, "hot_pool", hot.Address, need, requestID); err != nil {
 			// Not fatal: the transaction burns TRX instead of stalling.
-			w.log.Error("withdraw energy rental failed, falling back to burning TRX", "err", err)
+			logrus.Error("withdraw energy rental failed, falling back to burning TRX", "err", err)
 		}
 	}
 
-	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, w.token.Contract, data, w.cfg.Withdraw.FeeLimitSun)
+	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, w.token.Contract, data, bootstrap.Cfg.Withdraw.FeeLimitSun)
 	if err != nil {
 		return err
 	}
@@ -193,7 +195,7 @@ func (w *Worker) broadcast(ctx context.Context, id int64, txid string, tx *tron.
 	if w.pool != nil {
 		w.pool.RecordUsage(1)
 	}
-	w.log.Info("withdraw broadcast", "id", id, "txid", txid, "duplicated", result.Duplicated)
+	logrus.Info("withdraw broadcast", "id", id, "txid", txid, "duplicated", result.Duplicated)
 	return nil
 }
 
@@ -203,7 +205,7 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 	if !tron.IsValidAddress(row.ToAddress) {
 		return "invalid destination address"
 	}
-	for _, banned := range w.cfg.Withdraw.AddressBlacklist {
+	for _, banned := range bootstrap.Cfg.Withdraw.AddressBlacklist {
 		if banned == row.ToAddress {
 			return "destination address is blacklisted"
 		}
@@ -219,10 +221,10 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 	if !ok || amount.Sign() <= 0 {
 		return "invalid amount"
 	}
-	if maxUnits, ok := new(big.Int).SetString(w.cfg.Withdraw.MaxAmountUnits, 10); ok && maxUnits.Sign() > 0 && amount.Cmp(maxUnits) > 0 {
+	if maxUnits, ok := new(big.Int).SetString(bootstrap.Cfg.Withdraw.MaxAmountUnits, 10); ok && maxUnits.Sign() > 0 && amount.Cmp(maxUnits) > 0 {
 		return "amount exceeds the single withdrawal limit"
 	}
-	if limit, ok := new(big.Int).SetString(w.cfg.Withdraw.DailyMaxUnits, 10); ok && limit.Sign() > 0 {
+	if limit, ok := new(big.Int).SetString(bootstrap.Cfg.Withdraw.DailyMaxUnits, 10); ok && limit.Sign() > 0 {
 		var sum string
 		since := time.Now().Truncate(24 * time.Hour)
 		w.st.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
@@ -250,7 +252,7 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 		if res.Error != nil || res.RowsAffected == 0 {
 			return res.Error
 		}
-		w.log.Warn("withdraw rejected", "biz_order_no", row.BizOrderNo, "reason", reason)
+		logrus.Warn("withdraw rejected", "biz_order_no", row.BizOrderNo, "reason", reason)
 		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", w.event(row, "rejected", reason, now))
 	})
 }
@@ -272,7 +274,7 @@ func (w *Worker) Reconcile(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.reconcileOne(ctx, row, head.Number()); err != nil {
-			w.log.Error("reconcile withdraw failed", "biz_order_no", row.BizOrderNo, "err", err)
+			logrus.Error("reconcile withdraw failed", "biz_order_no", row.BizOrderNo, "err", err)
 		}
 	}
 	return nil
@@ -320,8 +322,8 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 	// same raw data again, which is deterministic for the same key and payload.
 	signed, err := w.sign.Sign(ctx, &signer.SignRequest{
 		Purpose: signer.PurposeWithdraw,
-		Path:    w.cfg.Wallet.HotWallet.Path,
-		Address: w.cfg.Wallet.HotWallet.Address,
+		Path:    bootstrap.Cfg.Wallet.HotWallet.Path,
+		Address: bootstrap.Cfg.Wallet.HotWallet.Address,
 		Tx:      tx,
 		Meta: signer.SignMeta{
 			ToAddress:   row.ToAddress,
@@ -388,15 +390,15 @@ func (w *Worker) event(row *model.WithdrawRecord, outcome, reason string, now ti
 }
 
 func (w *Worker) confirmBlocks() int64 {
-	if w.cfg.Withdraw.ConfirmBlocks > 0 {
-		return w.cfg.Withdraw.ConfirmBlocks
+	if bootstrap.Cfg.Withdraw.ConfirmBlocks > 0 {
+		return bootstrap.Cfg.Withdraw.ConfirmBlocks
 	}
-	return w.cfg.Deposit.Confirmations
+	return bootstrap.Cfg.Deposit.Confirmations
 }
 
 func (w *Worker) expirationSeconds() int64 {
-	if w.cfg.Withdraw.TxExpirationSec > 0 {
-		return w.cfg.Withdraw.TxExpirationSec
+	if bootstrap.Cfg.Withdraw.TxExpirationSec > 0 {
+		return bootstrap.Cfg.Withdraw.TxExpirationSec
 	}
 	return 60
 }

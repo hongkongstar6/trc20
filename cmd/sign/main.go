@@ -13,6 +13,7 @@ import (
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/signer"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -22,35 +23,35 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	policy := signer.PolicyFromConfig(app.Cfg)
-	svc, err := signer.New(app.Cfg.Sign, policy, signer.NewDBAudit(app.Store, app.Log))
+	policy := signer.PolicyFromConfig()
+	svc, err := signer.New(bootstrap.Cfg.Sign, policy, signer.NewDBAudit(app.Store))
 	if err != nil {
-		app.Log.Error("sign service init failed", "err", err)
+		logrus.Error("sign service init failed", "err", err)
 		return
 	}
-	r := signer.NewHTTPServer(svc, app.Cfg.Sign.Token, app.Log)
-	app.Log.Info("sign-service listening", "addr", app.Cfg.Sign.Listen, "mtls", app.Cfg.Sign.TLS.Enabled)
-	if !app.Cfg.Sign.TLS.Enabled {
-		if err := r.Run(app.Cfg.Sign.Listen); err != nil {
-			app.Log.Error("sign server stopped", "err", err)
+	r := signer.NewHTTPServer(svc, bootstrap.Cfg.Sign.Token)
+	logrus.Info("sign-service listening", "addr", bootstrap.Cfg.Sign.Listen, "mtls", bootstrap.Cfg.Sign.TLS.Enabled)
+	if !bootstrap.Cfg.Sign.TLS.Enabled {
+		if err := r.Run(bootstrap.Cfg.Sign.Listen); err != nil {
+			logrus.Error("sign server stopped", "err", err)
 		}
 		return
 	}
 
 	// mTLS needs a client CA pool, which gin's RunTLS cannot express, so the
 	// engine serves a TLS listener built here instead.
-	tlsCfg, err := serverTLS(app.Cfg.Sign.TLS.CAFile, app.Cfg.Sign.TLS.CertFile, app.Cfg.Sign.TLS.KeyFile)
+	tlsCfg, err := serverTLS(bootstrap.Cfg.Sign.TLS.CAFile, bootstrap.Cfg.Sign.TLS.CertFile, bootstrap.Cfg.Sign.TLS.KeyFile)
 	if err != nil {
-		app.Log.Error("mTLS setup failed", "err", err)
+		logrus.Error("mTLS setup failed", "err", err)
 		return
 	}
-	ln, err := net.Listen("tcp", app.Cfg.Sign.Listen)
+	ln, err := net.Listen("tcp", bootstrap.Cfg.Sign.Listen)
 	if err != nil {
-		app.Log.Error("sign listen failed", "err", err)
+		logrus.Error("sign listen failed", "err", err)
 		return
 	}
 	if err := r.RunListener(tls.NewListener(ln, tlsCfg)); err != nil {
-		app.Log.Error("sign server stopped", "err", err)
+		logrus.Error("sign server stopped", "err", err)
 	}
 }
 

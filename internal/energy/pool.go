@@ -22,20 +22,22 @@ type Pool struct {
 	energy config.EnergyConfig
 	mgr    *Manager
 	gw     *chain.Gateway
-	log    *logrus.Logger
-	addr   string
+	//log    *logrus.Logger
+	addr string
 
 	lastHourUsed int64
 	hourStart    time.Time
 }
 
 func NewPool(cfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway, log *logrus.Logger, hotWallet string) *Pool {
-	return &Pool{cfg: cfg.Pool, energy: cfg, mgr: mgr, gw: gw, log: log, addr: hotWallet, hourStart: time.Now()}
+	return &Pool{cfg: cfg.Pool, energy: cfg, mgr: mgr, gw: gw,
+		//log: log,
+		addr: hotWallet, hourStart: time.Now()}
 }
 
 func (p *Pool) Run(ctx context.Context) error {
 	if !p.cfg.Enabled {
-		p.log.Info("hot wallet energy pool disabled")
+		logrus.Info("hot wallet energy pool disabled")
 		return nil
 	}
 	interval := config.Duration(p.cfg.CheckInterval, 30*time.Second)
@@ -43,7 +45,7 @@ func (p *Pool) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		if err := p.topUp(ctx); err != nil {
-			p.log.Error("energy pool top up failed", "err", err)
+			logrus.Error("energy pool top up failed", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -71,16 +73,16 @@ func (p *Pool) topUp(ctx context.Context) error {
 		return nil
 	}
 	requestID := fmt.Sprintf("pool-%s-%d", p.addr[len(p.addr)-6:], time.Now().UnixMilli())
-	p.log.Info("renting hot wallet energy batch",
+	logrus.Info("renting hot wallet energy batch",
 		"available", available, "low_water", lowWater, "batch_txs", batchTxs, "need", need)
 
 	order, err := p.mgr.Acquire(ctx, "hot_pool", p.addr, need, requestID)
 	if err != nil {
 		// Withdrawals stay possible: the transaction simply burns TRX.
-		p.log.Error("hot wallet energy rental failed, withdrawals will burn TRX", "err", err)
+		logrus.Error("hot wallet energy rental failed, withdrawals will burn TRX", "err", err)
 		return err
 	}
-	p.log.Info("hot wallet energy batch delegated",
+	logrus.Info("hot wallet energy batch delegated",
 		"provider", order.Provider, "energy", order.RequestedEnergy, "cost_trx", order.CostTRX)
 	return nil
 }

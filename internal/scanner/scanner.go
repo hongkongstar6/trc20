@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
@@ -33,31 +34,33 @@ type token struct {
 }
 
 type Scanner struct {
-	cfg     *config.Config
-	st      *store.Store
-	gw      *chain.Gateway
-	log     *logrus.Logger
+	//cfg *config.Config
+	st *store.Store
+	gw *chain.Gateway
+	//log     *logrus.Logger
 	tokens  map[string]token // contract (base58) -> token
 	minUnit *big.Int
 }
 
-func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, log *logrus.Logger) *Scanner {
+func New(st *store.Store, gw *chain.Gateway) *Scanner {
 	tokens := map[string]token{}
-	for _, t := range cfg.Wallet.Tokens {
+	for _, t := range bootstrap.Cfg.Wallet.Tokens {
 		if t.Enabled {
 			tokens[t.Contract] = token{symbol: t.Symbol, decimals: t.Decimals}
 		}
 	}
 	minUnit := new(big.Int)
-	if _, ok := minUnit.SetString(cfg.Deposit.MinDepositUnits, 10); !ok {
+	if _, ok := minUnit.SetString(bootstrap.Cfg.Deposit.MinDepositUnits, 10); !ok {
 		minUnit = big.NewInt(0)
 	}
-	return &Scanner{cfg: cfg, st: st, gw: gw, log: log, tokens: tokens, minUnit: minUnit}
+	return &Scanner{st: st, gw: gw,
+		//log:    log,
+		tokens: tokens, minUnit: minUnit}
 }
 
 // Run scans forward continuously until ctx is cancelled.
 func (s *Scanner) Run(ctx context.Context) error {
-	interval := config.Duration(s.cfg.Deposit.PollInterval, 3*time.Second)
+	interval := config.Duration(bootstrap.Cfg.Deposit.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -66,7 +69,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 				return nil
 			}
 			// A node outage must stall the cursor, never skip blocks.
-			s.log.Error("scan tick failed", "err", err)
+			logrus.Error("scan tick failed", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -86,11 +89,11 @@ func (s *Scanner) tick(ctx context.Context) error {
 		return err
 	}
 	if err := s.confirmUpTo(ctx, head.Number()); err != nil {
-		s.log.Error("confirm pass failed", "err", err)
+		logrus.Error("confirm pass failed", "err", err)
 	}
 
 	from := cursor.BlockNumber + 1
-	to := min64(from+s.cfg.Deposit.BatchBlocks-1, head.Number())
+	to := min64(from+bootstrap.Cfg.Deposit.BatchBlocks-1, head.Number())
 	if from > to {
 		return nil
 	}
@@ -101,7 +104,7 @@ func (s *Scanner) tick(ctx context.Context) error {
 		}
 		if cursor.BlockHash != "" && block.BlockHeader.RawData.ParentHash != "" &&
 			!strings.EqualFold(block.BlockHeader.RawData.ParentHash, cursor.BlockHash) {
-			s.log.Warn("reorg detected", "block", num, "parent", block.BlockHeader.RawData.ParentHash, "cursor_hash", cursor.BlockHash)
+			logrus.Warn("reorg detected", "block", num, "parent", block.BlockHeader.RawData.ParentHash, "cursor_hash", cursor.BlockHash)
 			newCursor, err := s.handleReorg(ctx, num)
 			if err != nil {
 				return fmt.Errorf("reorg: %w", err)
@@ -125,7 +128,7 @@ func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCurso
 	var c model.ChainCursor
 	err := s.st.DB.WithContext(ctx).Where("name = ?", cursorName).Take(&c).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		start := s.cfg.Deposit.StartBlock
+		start := bootstrap.Cfg.Deposit.StartBlock
 		if start <= 0 {
 			start = head - 1
 		}
@@ -284,7 +287,7 @@ func (s *Scanner) isInternal(ctx context.Context, from string) (bool, error) {
 // confirmUpTo promotes pending records that reached the confirmation depth and
 // enqueues exactly one outbox event per record.
 func (s *Scanner) confirmUpTo(ctx context.Context, head int64) error {
-	limit := head - s.cfg.Deposit.Confirmations
+	limit := head - bootstrap.Cfg.Deposit.Confirmations
 	if limit <= 0 {
 		return nil
 	}
@@ -298,7 +301,7 @@ func (s *Scanner) confirmUpTo(ctx context.Context, head int64) error {
 	for i := range pending {
 		rec := pending[i]
 		if err := s.confirmOne(ctx, rec, head); err != nil {
-			s.log.Error("confirm deposit failed", "txid", rec.TxID, "event_index", rec.EventIndex, "err", err)
+			logrus.Error("confirm deposit failed", "txid", rec.TxID, "event_index", rec.EventIndex, "err", err)
 		}
 	}
 	return nil
@@ -318,7 +321,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 			UpdateColumns(map[string]any{"status": model.DepositStateOrphaned, "updated_at": now}).Error
 	}
 	if info.BlockNumber != rec.BlockNumber {
-		s.log.Warn("deposit moved to another block", "txid", rec.TxID, "old", rec.BlockNumber, "new", info.BlockNumber)
+		logrus.Warn("deposit moved to another block", "txid", rec.TxID, "old", rec.BlockNumber, "new", info.BlockNumber)
 		rec.BlockNumber = info.BlockNumber
 	}
 	return s.st.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -368,7 +371,7 @@ func depositEventID(rec model.DepositRecord) string {
 // chain, orphans the unconfirmed records above it and rewinds the cursor.
 func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.ChainCursor, error) {
 	forkPoint := detectedAt - 1
-	limit := detectedAt - s.cfg.Deposit.ReorgDepth
+	limit := detectedAt - bootstrap.Cfg.Deposit.ReorgDepth
 	for ; forkPoint > 0 && forkPoint >= limit; forkPoint-- {
 		var snap model.BlockSnapshot
 		err := s.st.DB.WithContext(ctx).Where("block_number = ?", forkPoint).Take(&snap).Error
@@ -387,7 +390,7 @@ func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.Cha
 		}
 	}
 	if forkPoint <= 0 || forkPoint < limit {
-		return nil, fmt.Errorf("reorg deeper than reorg_depth=%d, manual intervention required", s.cfg.Deposit.ReorgDepth)
+		return nil, fmt.Errorf("reorg deeper than reorg_depth=%d, manual intervention required", bootstrap.Cfg.Deposit.ReorgDepth)
 	}
 	cursor := &model.ChainCursor{Name: cursorName, BlockNumber: forkPoint}
 	err := s.st.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -414,7 +417,7 @@ func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.Cha
 }
 
 func (s *Scanner) pruneSnapshots(ctx context.Context, head int64) error {
-	keepFrom := head - s.cfg.Deposit.ReorgDepth*10
+	keepFrom := head - bootstrap.Cfg.Deposit.ReorgDepth*10
 	if keepFrom <= 0 {
 		return nil
 	}

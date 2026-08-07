@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/hongkongstar6/trc20/internal/config"
+	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
 	"github.com/sirupsen/logrus"
@@ -17,7 +17,7 @@ import (
 // NewHTTPServer exposes the signing service. The handler is deliberately tiny:
 // authentication, then policy, then sign. Everything else lives elsewhere so
 // this process links as little code as possible.
-func NewHTTPServer(svc *Service, token string, log *logrus.Logger) *gin.Engine {
+func NewHTTPServer(svc *Service, token string) *gin.Engine {
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
 	r.Use(gin.Recovery())
@@ -33,7 +33,7 @@ func NewHTTPServer(svc *Service, token string, log *logrus.Logger) *gin.Engine {
 		}
 		resp, err := svc.Sign(c.Request.Context(), &req, callerOf(c))
 		if err != nil {
-			log.Warn("sign rejected", "purpose", req.Purpose, "address", req.Address, "err", err)
+			logrus.Warn("sign rejected", "purpose", req.Purpose, "address", req.Address, "err", err)
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
@@ -84,15 +84,15 @@ func callerOf(c *gin.Context) string {
 
 // PolicyFromConfig derives the signing policy from the deployment config, so
 // the allowlists cannot drift away from what the workers are configured to do.
-func PolicyFromConfig(cfg *config.Config) Policy {
+func PolicyFromConfig() Policy {
 	policy := Policy{
 		TopupWhitelist:    map[string]string{},
 		AllowedContracts:  map[string]bool{},
-		GasAccountAddress: cfg.Energy.AutoTopup.SourceAddress,
-		SweepDestination:  cfg.Wallet.FinanceWallet.Address,
-		WithdrawFrom:      cfg.Wallet.HotWallet.Address,
+		GasAccountAddress: bootstrap.Cfg.Energy.AutoTopup.SourceAddress,
+		SweepDestination:  bootstrap.Cfg.Wallet.FinanceWallet.Address,
+		WithdrawFrom:      bootstrap.Cfg.Wallet.HotWallet.Address,
 	}
-	for name, conf := range cfg.Energy.AutoTopup.Providers {
+	for name, conf := range bootstrap.Cfg.Energy.AutoTopup.Providers {
 		if conf.DepositAddress != "" {
 			policy.TopupWhitelist[name] = conf.DepositAddress
 		}
@@ -100,7 +100,7 @@ func PolicyFromConfig(cfg *config.Config) Policy {
 			policy.TopupMaxSun = cap
 		}
 	}
-	for _, token := range cfg.Wallet.Tokens {
+	for _, token := range bootstrap.Cfg.Wallet.Tokens {
 		if token.Enabled {
 			policy.AllowedContracts[token.Contract] = true
 		}
@@ -109,13 +109,13 @@ func PolicyFromConfig(cfg *config.Config) Policy {
 }
 
 // NewDBAudit persists every signing decision, allowed or refused.
-func NewDBAudit(st *store.Store, log *logrus.Logger) AuditSink {
-	return &dbAudit{st: st, log: log}
+func NewDBAudit(st *store.Store) AuditSink {
+	return &dbAudit{st: st}
 }
 
 type dbAudit struct {
-	st  *store.Store
-	log *logrus.Logger
+	st *store.Store
+	//log *logrus.Logger
 }
 
 func (a *dbAudit) Record(ctx context.Context, purpose, path, address, txid, caller string, allowed bool, reason string) {
@@ -126,6 +126,6 @@ func (a *dbAudit) Record(ctx context.Context, purpose, path, address, txid, call
 	if err := a.st.DB.WithContext(ctx).Create(row).Error; err != nil {
 		// Audit must never silently vanish, but it must not block signing of a
 		// legitimate request either.
-		a.log.Error("sign audit write failed", "purpose", purpose, "allowed", allowed, "err", err)
+		logrus.Error("sign audit write failed", "purpose", purpose, "allowed", allowed, "err", err)
 	}
 }

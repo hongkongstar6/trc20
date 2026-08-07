@@ -25,37 +25,37 @@ func main() {
 
 	signClient, err := app.SignerClient()
 	if err != nil {
-		app.Log.Error("sign client init failed", "err", err)
+		logrus.Error("sign client init failed", "err", err)
 		return
 	}
 	logrus.Infoln("abcd")
 	var publishers []outbox.Publisher
-	if app.Cfg.Notify.HTTP.Enabled {
-		publishers = append(publishers, outbox.NewHTTPPublisher(app.Cfg.Notify))
+	if bootstrap.Cfg.Notify.HTTP.Enabled {
+		publishers = append(publishers, outbox.NewHTTPPublisher(bootstrap.Cfg.Notify))
 	}
-	if app.Cfg.Notify.RocketMQ.Enabled {
-		mq, err := outbox.NewRocketMQPublisher(app.Cfg.Notify)
+	if bootstrap.Cfg.Notify.RocketMQ.Enabled {
+		mq, err := outbox.NewRocketMQPublisher(bootstrap.Cfg.Notify)
 		if err != nil {
-			app.Log.Error("rocketmq publisher init failed", "err", err)
+			logrus.Error("rocketmq publisher init failed", "err", err)
 			return
 		}
 		defer mq.Close()
 		publishers = append(publishers, mq)
 	}
 	if len(publishers) > 0 {
-		dispatcher := outbox.NewDispatcher(app.Cfg.Notify, app.Store, app.Log, publishers...)
+		dispatcher := outbox.NewDispatcher(bootstrap.Cfg.Notify, app.Store, nil, publishers...)
 		go func() {
 			if err := dispatcher.Run(ctx); err != nil {
-				app.Log.Error("outbox dispatcher stopped", "err", err)
+				logrus.Error("outbox dispatcher stopped", "err", err)
 			}
 		}()
 	} else {
-		app.Log.Warn("no notify publisher enabled, events will queue in notify_outbox")
+		logrus.Warn("no notify publisher enabled, events will queue in notify_outbox")
 	}
 
-	r := api.New(app.Cfg, app.Store, signClient, app.Log).Router()
-	app.Log.Info("wallet-api listening", "addr", app.Cfg.API.Listen)
-	if err := r.Run(app.Cfg.API.Listen); err != nil {
-		app.Log.Error("http server stopped", "err", err)
+	r := api.New(bootstrap.Cfg, app.Store, signClient, nil).Router()
+	logrus.Info("wallet-api listening", "addr", bootstrap.Cfg.API.Listen)
+	if err := r.Run(bootstrap.Cfg.API.Listen); err != nil {
+		logrus.Error("http server stopped", "err", err)
 	}
 }

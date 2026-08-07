@@ -25,11 +25,13 @@ import (
 )
 
 type App struct {
-	Cfg     *config.Config
-	Log     *logrus.Logger //*slog.Logger
+	//Cfg *config.Config
+	//Log     *logrus.Logger //*slog.Logger
 	Store   *store.Store
 	Gateway *chain.Gateway
 }
+
+var Cfg *config.Config
 
 // Init loads the config, opens the datastores and builds the chain gateway.
 func Init(service string) (*App, error) {
@@ -41,6 +43,7 @@ func Init(service string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	Cfg = cfg // Assign the loaded config to the global variable
 	log := logx.NewLogrus(cfg.Log, service)
 	st, err := store.Open(cfg) //数据库
 	if err != nil {
@@ -57,17 +60,20 @@ func Init(service string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{Cfg: cfg, Log: log, Store: st, Gateway: gw}, nil
+	return &App{
+		//Cfg: cfg,
+		//Log:   log,
+		Store: st, Gateway: gw}, nil
 }
 
 // SignerClient builds the sign-service client.
 func (a *App) SignerClient() (*signer.Client, error) {
-	return signer.NewClient(a.Cfg.Sign)
+	return signer.NewClient(Cfg.Sign)
 }
 
 // EnergyManager builds the provider registry and the manager on top of it.
 func (a *App) EnergyManager() (*energy.Manager, error) {
-	provs, err := energy.Build(a.Cfg.Energy)
+	provs, err := energy.Build(Cfg.Energy)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +81,10 @@ func (a *App) EnergyManager() (*energy.Manager, error) {
 	for n := range provs {
 		names = append(names, n)
 	}
-	a.Log.Info("energy providers loaded", "providers", names, "mode", a.Cfg.Energy.Mode)
-	return energy.NewManager(a.Cfg.Energy, a.Store, a.Gateway, a.Log, provs), nil
+	logrus.Info("energy providers loaded", "providers", names, "mode", Cfg.Energy.Mode)
+	return energy.NewManager(Cfg.Energy, a.Store, a.Gateway,
+		nil, // a.Log,
+		provs), nil
 }
 
 // Context returns a context cancelled on SIGINT/SIGTERM.

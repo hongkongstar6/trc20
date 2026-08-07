@@ -15,6 +15,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/energy"
@@ -26,7 +27,7 @@ import (
 )
 
 type Service struct {
-	cfg    *config.Config
+	//cfg    *config.Config
 	st     *store.Store
 	gw     *chain.Gateway
 	sign   *signer.Client
@@ -36,9 +37,9 @@ type Service struct {
 	token  config.TokenConfig
 }
 
-func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pricer *energy.Pricer, log *logrus.Logger) (*Service, error) {
+func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pricer *energy.Pricer, log *logrus.Logger) (*Service, error) {
 	var token config.TokenConfig
-	for _, t := range cfg.Wallet.Tokens {
+	for _, t := range bootstrap.Cfg.Wallet.Tokens {
 		if t.Enabled {
 			token = t
 			break
@@ -47,19 +48,19 @@ func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, sign *signer.Cl
 	if token.Contract == "" {
 		return nil, errors.New("sweep: no enabled token configured")
 	}
-	if cfg.Wallet.FinanceWallet.Address == "" {
+	if bootstrap.Cfg.Wallet.FinanceWallet.Address == "" {
 		return nil, errors.New("sweep: wallet.finance_wallet.address is required")
 	}
-	return &Service{cfg: cfg, st: st, gw: gw, sign: sign, mgr: mgr, pricer: pricer, log: log, token: token}, nil
+	return &Service{st: st, gw: gw, sign: sign, mgr: mgr, pricer: pricer, log: log, token: token}, nil
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if !s.cfg.Sweep.Enabled {
+	if !bootstrap.Cfg.Sweep.Enabled {
 		s.log.Info("sweep disabled")
 		<-ctx.Done()
 		return nil
 	}
-	interval := config.Duration(s.cfg.Sweep.Interval, 5*time.Minute)
+	interval := config.Duration(bootstrap.Cfg.Sweep.Interval, 5*time.Minute)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -106,7 +107,7 @@ func (s *Service) candidates(ctx context.Context) ([]model.Wallet, error) {
 	err := s.st.DB.WithContext(ctx).Model(&model.DepositRecord{}).
 		Distinct("to_address").
 		Where("status = ? AND swept = ? AND internal = ?", model.DepositStateConfirmed, false, false).
-		Limit(s.cfg.Sweep.MaxPerRound).Pluck("to_address", &addresses).Error
+		Limit(bootstrap.Cfg.Sweep.MaxPerRound).Pluck("to_address", &addresses).Error
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +133,7 @@ func (s *Service) minSweepUnits() *big.Int {
 
 // isStale allows dust to be swept eventually so it cannot pile up forever.
 func (s *Service) isStale(ctx context.Context, address string) bool {
-	days := s.cfg.Sweep.Threshold.StaleDays
+	days := bootstrap.Cfg.Sweep.Threshold.StaleDays
 	if days <= 0 {
 		return false
 	}
@@ -165,7 +166,7 @@ func (s *Service) tokenBalance(ctx context.Context, address string) (*big.Int, e
 // sweepOne performs the full sweep for a single address under a lock so two
 // workers can never spend the same balance twice.
 func (s *Service) sweepOne(ctx context.Context, wallet model.Wallet, amount *big.Int) error {
-	unlock, ok := s.st.Lock(ctx, "sweep:"+wallet.Address, config.Duration(s.cfg.Sweep.LockTTL, 10*time.Minute))
+	unlock, ok := s.st.Lock(ctx, "sweep:"+wallet.Address, config.Duration(bootstrap.Cfg.Sweep.LockTTL, 10*time.Minute))
 	if !ok {
 		return nil
 	}
@@ -183,7 +184,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.Wallet, amount *big
 		return nil
 	}
 
-	finance := s.cfg.Wallet.FinanceWallet.Address
+	finance := bootstrap.Cfg.Wallet.FinanceWallet.Address
 	data, err := tron.EncodeTRC20Transfer(finance, amount)
 	if err != nil {
 		return err
@@ -201,7 +202,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.Wallet, amount *big
 	}
 
 	// Build and sign first: a rental starts expiring the moment it is granted.
-	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, s.token.Contract, data, s.cfg.Sweep.FeeLimitSun)
+	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, s.token.Contract, data, bootstrap.Cfg.Sweep.FeeLimitSun)
 	if err != nil {
 		return s.failSweep(ctx, record, err)
 	}
@@ -226,7 +227,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.Wallet, amount *big
 	need, err := s.mgr.EstimateEnergy(ctx, wallet.Address, s.token.Contract, data)
 	if err != nil {
 		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, "err", err)
-		need = s.cfg.Energy.EnergyPerTxNew
+		need = bootstrap.Cfg.Energy.EnergyPerTxNew
 	}
 	requestID := fmt.Sprintf("sweep-%d", record.ID)
 	order, err := s.mgr.Acquire(ctx, "sweep", wallet.Address, need, requestID)

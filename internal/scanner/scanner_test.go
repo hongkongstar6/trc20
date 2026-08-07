@@ -25,7 +25,7 @@ func newTestScanner(t *testing.T, minDeposit string) *Scanner {
 		{Symbol: "USDT", Contract: usdtBase58, Decimals: 6, Enabled: true},
 	}
 	cfg.Deposit.MinDepositUnits = minDeposit
-	return New(cfg, nil, nil, nil)
+	return New(nil, nil)
 }
 
 func validLog() chain.TxLog {
@@ -112,7 +112,7 @@ func TestNewIgnoresDisabledTokens(t *testing.T) {
 	cfg.Wallet.Tokens = []config.TokenConfig{
 		{Symbol: "USDT", Contract: usdtBase58, Decimals: 6, Enabled: false},
 	}
-	s := New(cfg, nil, nil, nil)
+	s := New(nil, nil)
 	if _, ok := s.decodeTransfer(validLog()); ok {
 		t.Fatal("a disabled token must not be scanned")
 	}

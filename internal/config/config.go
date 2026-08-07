@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -244,8 +245,13 @@ type NotifyConfig struct {
 var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`)
 
 // Load reads a yaml config and expands ${ENV} / ${ENV:-default} references so
-// secrets stay outside of the repository.
+// secrets stay outside of the repository. Before expanding it sources a .env
+// file (ENV_FILE, else the nearest .env next to the config or above the working
+// directory) so running from an IDE behaves like docker compose.
 func Load(path string) (*Config, error) {
+	if err := loadEnvFileFor(path); err != nil {
+		return nil, fmt.Errorf("load env file: %w", err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -277,6 +283,24 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// loadEnvFileFor resolves which .env to source for the given config path.
+func loadEnvFileFor(configPath string) error {
+	if explicit := os.Getenv("ENV_FILE"); explicit != "" {
+		return LoadDotEnv(explicit)
+	}
+	var start string
+	if abs, err := filepath.Abs(configPath); err == nil {
+		start = filepath.Dir(abs)
+	}
+	if p, ok := FindUp(start, ".env"); ok {
+		return LoadDotEnv(p)
+	}
+	if p, ok := FindUp("", ".env"); ok {
+		return LoadDotEnv(p)
+	}
+	return nil
 }
 
 func (c *Config) applyDefaults() {

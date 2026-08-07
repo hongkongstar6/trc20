@@ -33,7 +33,7 @@ type App struct {
 
 // Init loads the config, opens the datastores and builds the chain gateway.
 func Init(service string) (*App, error) {
-	path := flag.String("config", envOr("CONFIG_PATH", "../../configs/config.yaml"), "path to the config file")
+	path := flag.String("config", envOr("CONFIG_PATH", defaultConfigPath()), "path to the config file")
 	migrate := flag.Bool("migrate", false, "run schema auto migration and exit")
 	flag.Parse()
 
@@ -82,6 +82,18 @@ func (a *App) EnergyManager() (*energy.Manager, error) {
 // Context returns a context cancelled on SIGINT/SIGTERM.
 func Context() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+}
+
+// defaultConfigPath finds configs/config.yaml (falling back to the nile
+// example) by walking up from the working directory, so debugging a cmd/* from
+// an IDE works without passing -config.
+func defaultConfigPath() string {
+	for _, name := range []string{"configs/config.yaml", "configs/config.nile.yaml"} {
+		if p, ok := config.FindUp("", name); ok {
+			return p
+		}
+	}
+	return "configs/config.yaml"
 }
 
 func envOr(key, def string) string {

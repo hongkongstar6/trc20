@@ -4,15 +4,11 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 
 	"github.com/hongkongstar6/trc20/internal/api"
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
-	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/outbox"
 	"github.com/sirupsen/logrus"
 )
@@ -57,23 +53,9 @@ func main() {
 		app.Log.Warn("no notify publisher enabled, events will queue in notify_outbox")
 	}
 
-	srv := &http.Server{
-		Addr:              app.Cfg.API.Listen,
-		Handler:           api.New(app.Cfg, app.Store, signClient, app.Log).Router(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	go func() {
-		app.Log.Info("wallet-api listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			app.Log.Error("http server stopped", "err", err)
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-	shutdownCtx, cancel := contextWithTimeout(config.Duration("10s", 10*time.Second))
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		app.Log.Error("graceful shutdown failed", "err", err)
+	r := api.New(app.Cfg, app.Store, signClient, app.Log).Router()
+	app.Log.Info("wallet-api listening", "addr", app.Cfg.API.Listen)
+	if err := r.Run(app.Cfg.API.Listen); err != nil {
+		app.Log.Error("http server stopped", "err", err)
 	}
 }

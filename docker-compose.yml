@@ -65,6 +65,8 @@ services:
       ROCKETMQ_NAMESRV: rocketmq-namesrv:9876
     depends_on:   #启动sign服务前，确保mysql服务已经启动并且健康
       mysql: {condition: service_healthy} #等待 mysql 通过健康检查
+    volumes:
+      - ./log:/app/log   # 日志落到宿主机 ./log（config 中 log_dir: ./log）
     networks: [wallet]
 
   api:
@@ -74,6 +76,8 @@ services:
     ports: ["8080:8080"]
     depends_on:
       mysql: {condition: service_healthy}
+    volumes:
+      - ./log:/app/log
     networks: [wallet]
 
   scanner:
@@ -81,6 +85,8 @@ services:
     entrypoint: ["/app/scanner"]
     environment: *env
     depends_on: [api]
+    volumes:
+      - ./log:/app/log
     networks: [wallet]
 
   withdraw:
@@ -88,6 +94,8 @@ services:
     entrypoint: ["/app/withdraw"]
     environment: *env
     depends_on: [api, sign] #启动withdraw服务前，确保api,sign服务已经启动
+    volumes:
+      - ./log:/app/log
     networks: [wallet]
 
   sweep:
@@ -95,6 +103,8 @@ services:
     entrypoint: ["/app/sweep"]
     environment: *env
     depends_on: [api, sign] #启动sweep服务前，确保api,sign服务已经启动
+    volumes:
+      - ./log:/app/log
     networks: [wallet]
 
 volumes:

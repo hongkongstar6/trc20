@@ -41,7 +41,7 @@ func Init(service string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	log := logx.New(cfg.Log.Level, service)
+	log := logx.New(cfg.Log, service)
 	st, err := store.Open(cfg) //数据库
 	if err != nil {
 		return nil, err

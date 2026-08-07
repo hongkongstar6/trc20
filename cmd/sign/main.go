@@ -8,9 +8,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"net/http"
+	"net"
 	"os"
-	"time"
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/signer"
@@ -23,53 +22,51 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	ctx, stop := bootstrap.Context()
-	defer stop()
-
 	policy := signer.PolicyFromConfig(app.Cfg)
 	svc, err := signer.New(app.Cfg.Sign, policy, signer.NewDBAudit(app.Store, app.Log))
 	if err != nil {
 		app.Log.Error("sign service init failed", "err", err)
 		return
 	}
-	srv := &http.Server{
-		Addr:              app.Cfg.Sign.Listen,
-		Handler:           signer.NewHTTPServer(svc, app.Cfg.Sign.Token, app.Log),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	if app.Cfg.Sign.TLS.Enabled {
-		tlsCfg, err := serverTLS(app.Cfg.Sign.TLS.CAFile)
-		if err != nil {
-			app.Log.Error("mTLS setup failed", "err", err)
-			return
-		}
-		srv.TLSConfig = tlsCfg
-	}
-	go func() {
-		app.Log.Info("sign-service listening", "addr", srv.Addr, "mtls", app.Cfg.Sign.TLS.Enabled)
-		var err error
-		if app.Cfg.Sign.TLS.Enabled {
-			err = srv.ListenAndServeTLS(app.Cfg.Sign.TLS.CertFile, app.Cfg.Sign.TLS.KeyFile)
-		} else {
-			err = srv.ListenAndServe()
-		}
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+	r := signer.NewHTTPServer(svc, app.Cfg.Sign.Token, app.Log)
+	app.Log.Info("sign-service listening", "addr", app.Cfg.Sign.Listen, "mtls", app.Cfg.Sign.TLS.Enabled)
+	if !app.Cfg.Sign.TLS.Enabled {
+		if err := r.Run(app.Cfg.Sign.Listen); err != nil {
 			app.Log.Error("sign server stopped", "err", err)
-			stop()
 		}
-	}()
+		return
+	}
 
-	<-ctx.Done()
-	if err := srv.Close(); err != nil {
-		app.Log.Error("sign server close failed", "err", err)
+	// mTLS needs a client CA pool, which gin's RunTLS cannot express, so the
+	// engine serves a TLS listener built here instead.
+	tlsCfg, err := serverTLS(app.Cfg.Sign.TLS.CAFile, app.Cfg.Sign.TLS.CertFile, app.Cfg.Sign.TLS.KeyFile)
+	if err != nil {
+		app.Log.Error("mTLS setup failed", "err", err)
+		return
+	}
+	ln, err := net.Listen("tcp", app.Cfg.Sign.Listen)
+	if err != nil {
+		app.Log.Error("sign listen failed", "err", err)
+		return
+	}
+	if err := r.RunListener(tls.NewListener(ln, tlsCfg)); err != nil {
+		app.Log.Error("sign server stopped", "err", err)
 	}
 }
 
 // serverTLS requires client certificates: only the workers may sign.
-func serverTLS(caFile string) (*tls.Config, error) {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ClientAuth: tls.RequireAndVerifyClientCert}
+func serverTLS(caFile, certFile, keyFile string) (*tls.Config, error) {
 	if caFile == "" {
 		return nil, errors.New("sign.tls.ca_file is required for mTLS")
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		Certificates: []tls.Certificate{cert},
 	}
 	pem, err := os.ReadFile(caFile)
 	if err != nil {

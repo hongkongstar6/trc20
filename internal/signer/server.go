@@ -3,11 +3,11 @@ package signer
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
@@ -17,73 +17,69 @@ import (
 // NewHTTPServer exposes the signing service. The handler is deliberately tiny:
 // authentication, then policy, then sign. Everything else lives elsewhere so
 // this process links as little code as possible.
-func NewHTTPServer(svc *Service, token string, log *logrus.Logger) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	})
-	mux.Handle("/v1/sign", authorize(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "POST only"})
-			return
-		}
+func NewHTTPServer(svc *Service, token string, log *logrus.Logger) *gin.Engine {
+	r := gin.New()
+	r.HandleMethodNotAllowed = true
+	r.Use(gin.Recovery())
+	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+
+	v1 := r.Group("/v1", authorize(token))
+	v1.POST("/sign", func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 		var req SignRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		resp, err := svc.Sign(r.Context(), &req, callerOf(r))
+		resp, err := svc.Sign(c.Request.Context(), &req, callerOf(c))
 		if err != nil {
 			log.Warn("sign rejected", "purpose", req.Purpose, "address", req.Address, "err", err)
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, resp)
-	})))
-	mux.Handle("/v1/derive", authorize(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.JSON(http.StatusOK, resp)
+	})
+	v1.POST("/derive", func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<16)
 		var req struct {
 			Path string `json:"path"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		addr, err := svc.DeriveAddress(req.Path)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"address": addr, "path": req.Path})
-	})))
-	return mux
+		c.JSON(http.StatusOK, gin.H{"address": addr, "path": req.Path})
+	})
+	return r
 }
 
-func authorize(token string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token != "" {
-			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
-				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
-				return
-			}
+func authorize(token string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if token == "" {
+			c.Next()
+			return
 		}
-		next.ServeHTTP(w, r)
-	})
+		got := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		c.Next()
+	}
 }
 
 // callerOf identifies the client for the audit trail: the mTLS subject when
 // available, the peer address otherwise.
-func callerOf(r *http.Request) string {
-	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
-		return r.TLS.PeerCertificates[0].Subject.CommonName
+func callerOf(c *gin.Context) string {
+	if tls := c.Request.TLS; tls != nil && len(tls.PeerCertificates) > 0 {
+		return tls.PeerCertificates[0].Subject.CommonName
 	}
-	return r.RemoteAddr
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	return c.Request.RemoteAddr
 }
 
 // PolicyFromConfig derives the signing policy from the deployment config, so

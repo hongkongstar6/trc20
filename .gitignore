@@ -7,3 +7,5 @@ configs/config.mainnet*
 *.key
 *.crt
 etc/
+log/*
+!log/.gitkeep

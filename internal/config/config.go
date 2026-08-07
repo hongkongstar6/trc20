@@ -31,6 +31,9 @@ type Config struct {
 
 type LogConfig struct {
 	Level string `yaml:"level"`
+	// LogDir is the directory log files are written to. When empty logs go to
+	// stdout only. Files are rotated daily and named "<service>-YYYY-MM-DD.log".
+	LogDir string `yaml:"log_dir"`
 }
 
 type MySQLConfig struct {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -23,14 +24,25 @@ const (
 type formatter struct{}
 
 func (f *formatter) Format(e *logrus.Entry) ([]byte, error) {
-	file, line := caller(e)
+	var file string
+	var line int
+	//file, line := caller(e)
+	if e.Caller != nil {
+		file = filepath.Base(e.Caller.File)
+		line = e.Caller.Line
+	}
+	timestamp := time.Now().Local().Format("2006-01-02 15:04:05.000")
 
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "%s [%-5s] [%s:%d] %s",
-		e.Time.Local().Format("2006-01-02 15:04:05.000"),
-		levelName(e.Level), file, line, e.Message)
-	writeFields(&b, e.Data)
-	b.WriteByte('\n')
+
+	//msg := fmt.Sprintf("%s [%-5s] [%s:%d] %s\n", timestamp, strings.ToUpper(e.Level.String()), file, line, e.Message)
+
+	// fmt.Fprintf(&b, "%s [%-5s] [%s:%d] %s", timestamp, levelName(e.Level), file, line, e.Message)
+	// writeFields(&b, e.Data)
+	// b.WriteByte('\n')
+	// 格式化日志信息
+	msg := fmt.Sprintf("%s [%-5s] [%s:%d] %s\n", timestamp, strings.ToUpper(e.Level.String()), file, line, e.Message)
+	b.WriteString(msg)
 	return b.Bytes(), nil
 }
 
@@ -45,6 +57,7 @@ func caller(e *logrus.Entry) (string, int) {
 	if file == "" {
 		return "???", 0
 	}
+
 	return filepath.Base(file), line
 }
 

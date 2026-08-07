@@ -3,11 +3,11 @@ package energy
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
+	"github.com/sirupsen/logrus"
 )
 
 // Pool keeps delegated energy on the withdrawal hot wallet.
@@ -22,14 +22,14 @@ type Pool struct {
 	energy config.EnergyConfig
 	mgr    *Manager
 	gw     *chain.Gateway
-	log    *slog.Logger
+	log    *logrus.Logger
 	addr   string
 
 	lastHourUsed int64
 	hourStart    time.Time
 }
 
-func NewPool(cfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway, log *slog.Logger, hotWallet string) *Pool {
+func NewPool(cfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway, log *logrus.Logger, hotWallet string) *Pool {
 	return &Pool{cfg: cfg.Pool, energy: cfg, mgr: mgr, gw: gw, log: log, addr: hotWallet, hourStart: time.Now()}
 }
 

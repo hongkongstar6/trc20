@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
@@ -14,6 +13,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/signer"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/sirupsen/logrus"
 )
 
 // Topup refills the prepaid balance of each rental provider from a dedicated
@@ -34,12 +34,12 @@ type Topup struct {
 	st      *store.Store
 	gw      *chain.Gateway
 	signer  *signer.Client
-	log     *slog.Logger
+	log     *logrus.Logger
 	provs   map[string]Provider
 	gasPath string
 }
 
-func NewTopup(cfg config.AutoTopupConfig, st *store.Store, gw *chain.Gateway, sign *signer.Client, log *slog.Logger, provs map[string]Provider, gasPath string) *Topup {
+func NewTopup(cfg config.AutoTopupConfig, st *store.Store, gw *chain.Gateway, sign *signer.Client, log *logrus.Logger, provs map[string]Provider, gasPath string) *Topup {
 	return &Topup{cfg: cfg, st: st, gw: gw, signer: sign, log: log, provs: provs, gasPath: gasPath}
 }
 

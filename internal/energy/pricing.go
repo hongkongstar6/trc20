@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
+	"github.com/sirupsen/logrus"
 )
 
 // Pricer computes the sweep threshold at runtime from the current provider
@@ -22,12 +22,11 @@ import (
 //	min_sweep = max(cost_usd / target_cost_ratio, cost_usd * safety_multiple)
 //	min_sweep = clamp(min_sweep, min_usdt, max_usdt)
 type Pricer struct {
-	cfg    config.SweepThresholdConfig
-	energy config.EnergyConfig
-	mgr    *Manager
-	gw     *chain.Gateway
-	log    *slog.Logger
-
+	cfg       config.SweepThresholdConfig
+	energy    config.EnergyConfig
+	mgr       *Manager
+	gw        *chain.Gateway
+	log       *logrus.Logger
 	mu        sync.RWMutex
 	threshold float64
 	costUSD   float64
@@ -35,7 +34,7 @@ type Pricer struct {
 	refreshed time.Time
 }
 
-func NewPricer(threshold config.SweepThresholdConfig, energyCfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway, log *slog.Logger) *Pricer {
+func NewPricer(threshold config.SweepThresholdConfig, energyCfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway, log *logrus.Logger) *Pricer {
 	return &Pricer{cfg: threshold, energy: energyCfg, mgr: mgr, gw: gw, log: log, trxUSD: threshold.TRXPriceUSD}
 }
 

@@ -8,13 +8,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"log/slog"
 	"math/big"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
 	"github.com/hongkongstar6/trc20/internal/config"
@@ -30,10 +30,10 @@ type Server struct {
 	cfg  *config.Config
 	st   *store.Store
 	sign *signer.Client
-	log  *slog.Logger
+	log  *logrus.Logger
 }
 
-func New(cfg *config.Config, st *store.Store, sign *signer.Client, log *slog.Logger) *Server {
+func New(cfg *config.Config, st *store.Store, sign *signer.Client, log *logrus.Logger) *Server {
 	return &Server{cfg: cfg, st: st, sign: sign, log: log}
 }
 

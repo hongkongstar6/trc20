@@ -18,23 +18,40 @@ import (
 // daily rotating file named "<binary>-YYYY-MM-DD.log" (e.g. api-2026-08-10.log)
 // inside that directory and mirrored to stdout; otherwise it goes to stdout only.
 // service is attached as a field on every record.
-func New(cfg config.LogConfig, service string) *slog.Logger {
-	return slog.New(newHandler(NewLogrus(cfg), level(cfg.Level))).With("service", service)
-}
+
+// func New(cfg config.LogConfig, service string) *slog.Logger {
+// 	return slog.New(newHandler(NewLogrus(cfg, service), level(cfg.Level))).With("service", service)
+// }
+
+// func New(cfg config.LogConfig, service string) *logrus.Logger {
+// 	//return slog.New(newHandler(NewLogrus(cfg, service), level(cfg.Level))).With("service", service)
+// 	return NewLogrus(cfg, service)
+// }
 
 // NewLogrus builds the underlying logrus logger, for code that wants the logrus
 // API directly instead of the slog facade returned by New.
-func NewLogrus(cfg config.LogConfig) *logrus.Logger {
-	l := logrus.New()
-	l.SetOutput(writer(cfg))
-	l.SetFormatter(&formatter{})
-	l.SetLevel(logrusLevel(level(cfg.Level)))
-	return l
+//
+//	func NewLogrus(cfg config.LogConfig, name string) *logrus.Logger {
+//		l := logrus.StandardLogger()
+//		l.SetOutput(writer(cfg, name))
+//		l.SetFormatter(&formatter{})
+//		l.SetLevel(logrusLevel(level(cfg.Level)))
+//		return l
+//	}
+func NewLogrus(cfg config.LogConfig, name string) *logrus.Logger {
+	dir := strings.TrimSpace(cfg.LogDir)
+	dw := newDailyWriter(dir, name)
+
+	logrus.SetOutput(dw)
+	logrus.SetReportCaller(true) //显示行号和函数名
+	logrus.SetFormatter(&formatter{})
+	logrus.SetLevel(logrusLevel(level(cfg.Level)))
+	return logrus.StandardLogger()
 }
 
-func writer(cfg config.LogConfig) io.Writer {
+func writer(cfg config.LogConfig, name string) io.Writer {
 	if dir := strings.TrimSpace(cfg.LogDir); dir != "" {
-		return fileWriter(dir, binaryName())
+		return fileWriter(dir, name)
 	}
 	return os.Stdout
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/outbox"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -31,7 +32,7 @@ func main() {
 		app.Log.Error("sign client init failed", "err", err)
 		return
 	}
-
+	logrus.Infoln("abcd")
 	var publishers []outbox.Publisher
 	if app.Cfg.Notify.HTTP.Enabled {
 		publishers = append(publishers, outbox.NewHTTPPublisher(app.Cfg.Notify))

@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math/big"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
 	"github.com/hongkongstar6/trc20/internal/tron"
+	"github.com/sirupsen/logrus"
 )
 
 const cursorName = "tron_deposit"
@@ -36,12 +36,12 @@ type Scanner struct {
 	cfg     *config.Config
 	st      *store.Store
 	gw      *chain.Gateway
-	log     *slog.Logger
+	log     *logrus.Logger
 	tokens  map[string]token // contract (base58) -> token
 	minUnit *big.Int
 }
 
-func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, log *slog.Logger) *Scanner {
+func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, log *logrus.Logger) *Scanner {
 	tokens := map[string]token{}
 	for _, t := range cfg.Wallet.Tokens {
 		if t.Enabled {

@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -20,6 +19,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/sirupsen/logrus"
 )
 
 // Publisher is one delivery channel (HTTP callback, RocketMQ, ...).
@@ -32,11 +32,11 @@ type Publisher interface {
 type Dispatcher struct {
 	cfg        config.NotifyConfig
 	st         *store.Store
-	log        *slog.Logger
+	log        *logrus.Logger
 	publishers []Publisher
 }
 
-func NewDispatcher(cfg config.NotifyConfig, st *store.Store, log *slog.Logger, publishers ...Publisher) *Dispatcher {
+func NewDispatcher(cfg config.NotifyConfig, st *store.Store, log *logrus.Logger, publishers ...Publisher) *Dispatcher {
 	return &Dispatcher{cfg: cfg, st: st, log: log, publishers: publishers}
 }
 

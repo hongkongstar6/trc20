@@ -5,7 +5,6 @@ package bootstrap
 import (
 	"context"
 	"flag"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +15,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/logx"
 	"github.com/hongkongstar6/trc20/internal/signer"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/sirupsen/logrus"
 
 	// Providers self register through their init functions; the registry keeps
 	// the rest of the system free of provider specific imports.
@@ -26,7 +26,7 @@ import (
 
 type App struct {
 	Cfg     *config.Config
-	Log     *slog.Logger
+	Log     *logrus.Logger //*slog.Logger
 	Store   *store.Store
 	Gateway *chain.Gateway
 }
@@ -41,7 +41,7 @@ func Init(service string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	log := logx.New(cfg.Log, service)
+	log := logx.NewLogrus(cfg.Log, service)
 	st, err := store.Open(cfg) //数据库
 	if err != nil {
 		return nil, err

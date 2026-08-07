@@ -3,11 +3,10 @@ package energy
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/hongkongstar6/trc20/internal/config"
+	"github.com/sirupsen/logrus"
 )
 
 type fakeProvider struct {
@@ -42,8 +41,8 @@ func (f *fakeProvider) Balance(context.Context) (float64, string, error) {
 	return f.balance, f.deposit, nil
 }
 
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+func testLogger() *logrus.Logger {
+	return logrus.New()
 }
 
 func newTestManager(mode string, provs map[string]Provider) *Manager {

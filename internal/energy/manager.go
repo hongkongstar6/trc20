@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/sirupsen/logrus"
 )
 
 // FeeModeBurn is recorded on transactions that paid by burning TRX.
@@ -27,7 +27,7 @@ type Manager struct {
 	cfg   config.EnergyConfig
 	st    *store.Store
 	gw    *chain.Gateway
-	log   *slog.Logger
+	log   *logrus.Logger
 	provs map[string]Provider
 
 	mu     sync.Mutex
@@ -39,7 +39,7 @@ type cachedQuote struct {
 	expires time.Time
 }
 
-func NewManager(cfg config.EnergyConfig, st *store.Store, gw *chain.Gateway, log *slog.Logger, provs map[string]Provider) *Manager {
+func NewManager(cfg config.EnergyConfig, st *store.Store, gw *chain.Gateway, log *logrus.Logger, provs map[string]Provider) *Manager {
 	return &Manager{cfg: cfg, st: st, gw: gw, log: log, provs: provs, quotes: map[string]cachedQuote{}}
 }
 

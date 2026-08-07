@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,12 +11,13 @@ import (
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/sirupsen/logrus"
 )
 
 // NewHTTPServer exposes the signing service. The handler is deliberately tiny:
 // authentication, then policy, then sign. Everything else lives elsewhere so
 // this process links as little code as possible.
-func NewHTTPServer(svc *Service, token string, log *slog.Logger) http.Handler {
+func NewHTTPServer(svc *Service, token string, log *logrus.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -113,13 +113,13 @@ func PolicyFromConfig(cfg *config.Config) Policy {
 }
 
 // NewDBAudit persists every signing decision, allowed or refused.
-func NewDBAudit(st *store.Store, log *slog.Logger) AuditSink {
+func NewDBAudit(st *store.Store, log *logrus.Logger) AuditSink {
 	return &dbAudit{st: st, log: log}
 }
 
 type dbAudit struct {
 	st  *store.Store
-	log *slog.Logger
+	log *logrus.Logger
 }
 
 func (a *dbAudit) Record(ctx context.Context, purpose, path, address, txid, caller string, allowed bool, reason string) {

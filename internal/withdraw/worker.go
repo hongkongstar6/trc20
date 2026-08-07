@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math/big"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/signer"
 	"github.com/hongkongstar6/trc20/internal/store"
 	"github.com/hongkongstar6/trc20/internal/tron"
+	"github.com/sirupsen/logrus"
 )
 
 type Worker struct {
@@ -30,11 +30,11 @@ type Worker struct {
 	sign  *signer.Client
 	mgr   *energy.Manager
 	pool  *energy.Pool
-	log   *slog.Logger
+	log   *logrus.Logger
 	token config.TokenConfig
 }
 
-func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pool *energy.Pool, log *slog.Logger) (*Worker, error) {
+func New(cfg *config.Config, st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pool *energy.Pool, log *logrus.Logger) (*Worker, error) {
 	var token config.TokenConfig
 	for _, t := range cfg.Wallet.Tokens {
 		if t.Enabled {

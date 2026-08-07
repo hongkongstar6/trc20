@@ -30,7 +30,7 @@ func (w *dailyWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	day := time.Now().Format("2006-01-02")
+	day := time.Now().Format("2006-01-02") //跨天判断
 	if w.file == nil || day != w.day {
 		if err := w.rotate(day); err != nil {
 			return 0, err

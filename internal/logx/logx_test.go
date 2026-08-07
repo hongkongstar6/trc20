@@ -13,7 +13,7 @@ import (
 
 func TestNewWritesDailyFileInPlainFormat(t *testing.T) {
 	dir := t.TempDir()
-	log := New(config.LogConfig{Level: "info", LogDir: dir}, "wallet-api")
+	log := NewLogrus(config.LogConfig{Level: "info", LogDir: dir}, "wallet-api")
 	log.Error("解析参数失败err:invalid character", "txid", "abc")
 
 	want := filepath.Join(dir, binaryName()+"-"+time.Now().Format("2006-01-02")+".log")
@@ -31,7 +31,7 @@ func TestNewWritesDailyFileInPlainFormat(t *testing.T) {
 
 func TestLevelFiltering(t *testing.T) {
 	dir := t.TempDir()
-	log := New(config.LogConfig{Level: "warn", LogDir: dir}, "svc")
+	log := NewLogrus(config.LogConfig{Level: "warn", LogDir: dir}, "svc")
 	log.Info("dropped")
 	log.Warn("kept")
 
@@ -50,7 +50,8 @@ func TestLevelFiltering(t *testing.T) {
 
 func TestGroupedAttrsUseDottedKeys(t *testing.T) {
 	dir := t.TempDir()
-	log := New(config.LogConfig{LogDir: dir}, "svc").WithGroup("chain").With("block", 42)
+	//log := New(config.LogConfig{LogDir: dir}, "svc").WithGroup("chain").With("block", 42)
+	log := NewLogrus(config.LogConfig{LogDir: dir}, "svc")
 	log.Info("scanned")
 
 	b, err := os.ReadFile(filepath.Join(dir, binaryName()+"-"+time.Now().Format("2006-01-02")+".log"))
@@ -64,6 +65,6 @@ func TestGroupedAttrsUseDottedKeys(t *testing.T) {
 
 func TestNewStdoutOnlyWhenNoDir(t *testing.T) {
 	// No LogDir: must not create files anywhere; just exercise the path.
-	log := New(config.LogConfig{Level: "debug"}, "svc")
+	log := NewLogrus(config.LogConfig{Level: "debug"}, "svc")
 	log.Debug("noop")
 }

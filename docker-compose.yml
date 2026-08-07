@@ -63,8 +63,8 @@ services:
       GAS_ACCOUNT_ADDRESS: ${GAS_ACCOUNT_ADDRESS}
       TRONGRID_API_KEY: ${TRONGRID_API_KEY:-}
       ROCKETMQ_NAMESRV: rocketmq-namesrv:9876
-    depends_on:
-      mysql: {condition: service_healthy}
+    depends_on:   #启动sign服务前，确保mysql服务已经启动并且健康
+      mysql: {condition: service_healthy} #等待 mysql 通过健康检查
     networks: [wallet]
 
   api:
@@ -87,14 +87,14 @@ services:
     image: wallet:v1
     entrypoint: ["/app/withdraw"]
     environment: *env
-    depends_on: [api, sign]
+    depends_on: [api, sign] #启动withdraw服务前，确保api,sign服务已经启动
     networks: [wallet]
 
   sweep:
     image: wallet:v1
     entrypoint: ["/app/sweep"]
     environment: *env
-    depends_on: [api, sign]
+    depends_on: [api, sign] #启动sweep服务前，确保api,sign服务已经启动
     networks: [wallet]
 
 volumes:

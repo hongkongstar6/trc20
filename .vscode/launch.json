@@ -9,7 +9,7 @@
       "program": "${workspaceFolder}/cmd/api",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
-      "args": ["-config", "${workspaceFolder}/configs/config.nile.yaml"]
+      "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
     },
     {
       "name": "scanner",
@@ -19,7 +19,7 @@
       "program": "${workspaceFolder}/cmd/scanner",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
-      "args": ["-config", "${workspaceFolder}/configs/config.nile.yaml"]
+      "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
     },
     {
       "name": "withdraw",
@@ -29,7 +29,7 @@
       "program": "${workspaceFolder}/cmd/withdraw",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
-      "args": ["-config", "${workspaceFolder}/configs/config.nile.yaml"]
+      "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
     },
     {
       "name": "sweep",
@@ -39,7 +39,7 @@
       "program": "${workspaceFolder}/cmd/sweep",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
-      "args": ["-config", "${workspaceFolder}/configs/config.nile.yaml"]
+      "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
     },
     {
       "name": "sign",
@@ -49,7 +49,7 @@
       "program": "${workspaceFolder}/cmd/sign",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
-      "args": ["-config", "${workspaceFolder}/configs/config.nile.yaml"]
+      "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
     }
   ]
 }

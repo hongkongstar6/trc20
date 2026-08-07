@@ -42,6 +42,8 @@ func NewClient(cfg config.SignConfig) (*Client, error) {
 }
 
 func buildTLS(cfg config.SignConfig) (*tls.Config, error) {
+	dir, _ := os.Getwd()
+	fmt.Println("当前工作目录:", dir)
 	out := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: cfg.TLS.ServerName}
 	if cfg.TLS.CertFile != "" && cfg.TLS.KeyFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile)

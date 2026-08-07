@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -16,6 +17,8 @@ import (
 )
 
 func main() {
+	pwd, _ := os.Getwd()
+	fmt.Println("sign 当前工作目录:", pwd)
 	app, err := bootstrap.Init("sign-service")
 	if err != nil {
 		panic(err)

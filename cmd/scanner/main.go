@@ -3,11 +3,16 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/scanner"
 )
 
 func main() {
+	pwd, _ := os.Getwd()
+	fmt.Println("scanner 当前工作目录:", pwd)
 	app, err := bootstrap.Init("deposit-scanner")
 	if err != nil {
 		panic(err)

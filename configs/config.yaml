@@ -1,0 +1,189 @@
+# Mainnet configuration example. Only the differences from configs/config.nile.yaml
+# are commented; copy that file and apply these sections.
+#
+# Rollout order that this config assumes:
+#   1. Nile with energy.mode=fixed / trx_burn to exercise the whole flow.
+#   2. Mainnet with small amounts and one rental provider enabled.
+#   3. Mainnet with both providers and energy.mode=cheapest.
+#   4. auto_topup.enabled=true only after the topup audit trail looks right.
+env: prod
+network: mainnet
+
+log:
+    level: info
+    log_dir: "./log" #日志文件日志
+
+mysql:
+    dsn: "zhp01:Zhp1234%@tcp(43.153.210.204:11000)/pay?parseTime=true&loc=Local&charset=utf8mb4"
+    max_open_conns: 64
+    max_idle_conns: 64
+    conn_max_lifetime: 30m
+
+redis:
+    addr: "${REDIS_ADDR:-127.0.0.1:6379}"
+    password: "${REDIS_PASSWORD:-}"
+    db: 0
+    prefix: "wallet:nile"
+
+api:
+    listen: ":8080"
+    hmac_secret: "${API_HMAC_SECRET}"
+    # Mainnet must pin the business system egress IPs.
+    allowed_ips:
+        - "10.0.0.11"
+        - "127.0.0.1"
+    signature_skew: 5m
+    nonce_ttl: 10m
+
+sign:
+    listen: ":8090"
+    endpoint: "${SIGN_ENDPOINT:-http://127.0.0.1:8090}"
+    token: "${SIGN_TOKEN}"
+    # Production: the mnemonic should be injected by the secret manager, or
+    # better, replaced by a KMS/HSM/Vault Transit backed signing key.
+    mnemonic: "${WALLET_MNEMONIC}"
+    passphrase: "${WALLET_PASSPHRASE:-}"
+    tls:
+        enabled: true
+        cert_file: ./etc/wallet/tls/sign.crt
+        key_file: ./etc/wallet/tls/sign.key
+        ca_file: ./etc/wallet/tls/ca.crt
+        server_name: sign.internal
+
+chain:
+    # FullNode first once it is ready; TronGrid stays as the failover.
+    nodes:
+        - name: fullnode
+          type: fullnode
+          endpoint: "${FULLNODE_ENDPOINT}"
+          priority: 1
+          enabled: true
+          timeout: 10s
+        - name: trongrid
+          type: trongrid
+          endpoint: https://api.trongrid.io #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
+          api_key: "${TRONGRID_API_KEY}"
+          priority: 2
+          enabled: true
+          timeout: 10s
+    solidity_for_confirm: true
+    retry_per_node: 2
+    broadcast_timeout: 15s
+
+wallet:
+    account_path: "m/44'/195'/0'/0"
+    tokens:
+        - symbol: USDT
+          contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t # mainnet USDT-TRC20
+          decimals: 6
+          enabled: true
+
+deposit:
+    start_block: 0 # 0 means start from the current head
+    batch_blocks: 20
+    confirmations: 19 # TRON finality is ~19 blocks (SR round)
+    poll_interval: 3s
+    reorg_depth: 60
+    min_deposit_units: "10000" # 0.01 USDT dust filter
+
+withdraw:
+    enabled: true
+    poll_interval: 3s
+    fee_limit_sun: 40000000 # 40 TRX ceiling, only spent when energy is short
+    tx_expiration_sec: 60
+    max_amount_units: "50000000000" # 50,000 USDT per order
+    daily_max_units: "500000000000" # 500,000 USDT per day
+    confirm_blocks: 19
+    address_blacklist: []
+
+sweep:
+    enabled: true
+    interval: 5m
+    fee_limit_sun: 40000000
+    max_per_round: 50
+    lock_ttl: 10m
+    threshold:
+        # min_sweep is computed at runtime, never hard coded:
+        #   cost_usd  = (energy quote + bandwidth burn) * TRX/USD
+        #   min_sweep = max(cost_usd / target_cost_ratio, cost_usd * safety_multiple)
+        target_cost_ratio: 0.005
+        safety_multiple: 20
+        min_usdt: 50
+        max_usdt: 500
+        refresh_interval: 10m
+        trx_price_usd: 0 # 0 means read trx_price_url
+        trx_price_url: "https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=usd"
+        stale_days: 14
+
+energy:
+    # Real comparison shopping across the enabled providers, burning TRX only
+    # when every rental fails.
+    mode: cheapest
+    default_period: 1h
+    providers:
+        #trx_burn:
+        #    enabled: true
+        gasstation:
+            enabled: true
+            options:
+                base_url: https://openapi.gasstation.ai
+                app_id: "${GASSTATION_APP_ID}"
+                # GasStation also requires a fixed egress IP allowlist (error 100006).
+                app_secret: "${GASSTATION_APP_SECRET}"
+        tronenergyrent:
+            enabled: true
+            options:
+                base_url: https://api.tronenergyrent.com
+                # The key travels in the query string: make sure no proxy or access
+                # log records full URLs for this host.
+                api_key: "${TRONENERGYRENT_API_KEY}"
+    pool:
+        # ~200 withdrawals a day from one hot wallet: renting per withdrawal costs
+        # 200 orders and 200 small-order surcharges, batching costs about 20.
+        enabled: true
+        check_interval: 30s
+        low_water_txs: 3
+        batch_txs: 10
+        max_batch_txs: 30
+        period: 1h
+    auto_topup:
+        enabled: false
+        source_address: "${GAS_ACCOUNT_ADDRESS}"
+        gas_account:
+            target_trx: 20000
+            low_watermark_trx: 8000
+        providers:
+            gasstation:
+                enabled: true
+                low_watermark_trx: 2000
+                target_trx: 6000
+                max_single_topup_trx: 4000
+                max_daily_topup_trx: 8000
+                max_daily_topup_count: 3
+                # Hard whitelist. The address returned by the provider API is compared
+                # against this value before every transfer.
+                deposit_address: "${GASSTATION_DEPOSIT_ADDRESS}"
+            tronenergyrent:
+                enabled: true
+                low_watermark_trx: 2000
+                target_trx: 6000
+                max_single_topup_trx: 4000
+                max_daily_topup_trx: 8000
+                max_daily_topup_count: 3
+                deposit_address: "${TRONENERGYRENT_DEPOSIT_ADDRESS}"
+
+notify:
+    http:
+        enabled: true
+        url: "${NOTIFY_URL:-http://127.0.0.1:9000/wallet/callback}"
+        secret: "${NOTIFY_SECRET}"
+        timeout: 10s
+    rocketmq:
+        enabled: true
+        name_server:
+            - "${ROCKETMQ_NAMESRV:-127.0.0.1:9876}"
+        topic: wallet_event
+        group: wallet_gateway
+    batch_size: 100
+    poll_interval: 1s
+    max_retry: 10

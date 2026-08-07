@@ -1,7 +1,8 @@
 bin/
 .env
 *.local.yaml
-configs/config.yaml
+configs/config.nile.yaml
+configs/config.mainnet*
 *.pem
 *.key
 *.crt

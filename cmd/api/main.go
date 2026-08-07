@@ -5,7 +5,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/hongkongstar6/trc20/internal/api"
@@ -15,6 +17,8 @@ import (
 )
 
 func main() {
+	pwd, _ := os.Getwd()
+	fmt.Println("api 当前工作目录:", pwd)
 	app, err := bootstrap.Init("wallet-api")
 	if err != nil {
 		panic(err)

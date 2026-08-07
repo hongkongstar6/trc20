@@ -2,12 +2,17 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/energy"
 	"github.com/hongkongstar6/trc20/internal/withdraw"
 )
 
 func main() {
+	pwd, _ := os.Getwd()
+	fmt.Println("withdraw 当前工作目录:", pwd)
 	app, err := bootstrap.Init("withdraw-worker")
 	if err != nil {
 		panic(err)

@@ -3,6 +3,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
@@ -13,6 +15,9 @@ import (
 //归集
 
 func main() {
+	pwd, _ := os.Getwd()
+	fmt.Println("sweep 当前工作目录:", pwd)
+
 	app, err := bootstrap.Init("sweep-service")
 	if err != nil {
 		panic(err)

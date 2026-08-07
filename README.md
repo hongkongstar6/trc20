@@ -96,6 +96,12 @@ CONFIG_PATH=configs/config.nile.yaml ./bin/api
 
 所需的环境变量列在 `.env.example` 文件中。
 
+启动时会自动加载 `.env`：优先取 `ENV_FILE` 指定的文件，否则从配置文件所在目录
+（再退回当前工作目录）向上查找最近的 `.env`。已存在的真实环境变量优先，文件不存在
+也不会报错。未传 `-config` / `CONFIG_PATH` 时，会向上查找 `configs/config.yaml`，
+找不到再回退到 `configs/config.nile.yaml`，因此在 VS Code 里直接调试 `cmd/*`
+无需额外参数（`.vscode/launch.json` 已提供各服务的调试配置）。
+
 Nile 配置中的两个属性是有意为之：
 
 - `energy.mode: fixed` 和 `energy.fixed: trx_burn`，并且两个租赁能源提供商

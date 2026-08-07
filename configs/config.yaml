@@ -11,7 +11,7 @@ network: mainnet
 
 log:
     level: info
-    log_dir: "./log" #日志文件日志
+    log_dir: "./log" #日志路径
 
 mysql:
     dsn: "zhp01:Zhp1234%@tcp(43.153.210.204:11000)/pay?parseTime=true&loc=Local&charset=utf8mb4"

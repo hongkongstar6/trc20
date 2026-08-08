@@ -49,6 +49,10 @@ services:
   sign:
     image: wallet:v1
     entrypoint: ["/app/sign"]
+    # .env is injected as environment variables instead of being mounted into
+    # the container: every service then sees the same values, including the ones
+    # that are not repeated below (FULLNODE_ENDPOINT, energy provider keys...).
+    env_file: &env_file [.env]
     environment: &env
       CONFIG_PATH: /app/configs/config.yaml
       MYSQL_DSN: "wallet:${MYSQL_PASSWORD:-wallet}@tcp(mysql:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local"
@@ -68,20 +72,23 @@ services:
     depends_on:   #启动sign服务前，确保mysql服务已经启动并且健康
       mysql: {condition: service_healthy} #等待 mysql 通过健康检查
     volumes:
-      - ./log:/app/log   # 日志落到宿主机 ./log（config 中 log_dir: ./log）
+      # 日志落到宿主机 ./log（config 中 log_dir: ./log）。容器以 uid 10001 运行，
+      # 宿主机目录需可写：mkdir -p log && chmod 777 log（否则只输出到 stdout）。
+      - ./log:/app/log
     networks: [wallet]
 
   api:
     image: wallet:v1
     entrypoint: ["/bin/sh", "-c", "/app/api -migrate && exec /app/api"]
+    env_file: *env_file
     environment: 
       <<: *env
       TZ: Asia/Shanghai
     ports: ["8080:8080"]
-    depends_on:
+    depends_on: #api 会连接 rocketmq 发布 outbox 事件
       mysql: {condition: service_healthy}
-
-      
+      rocketmq-namesrv: {condition: service_started}
+      rocketmq-broker: {condition: service_started}
     volumes:
       - ./log:/app/log
     networks: [wallet]
@@ -89,6 +96,7 @@ services:
   scanner:
     image: wallet:v1
     entrypoint: ["/app/scanner"]
+    env_file: *env_file
     environment: 
       <<: *env
       TZ: Asia/Shanghai
@@ -100,27 +108,25 @@ services:
   withdraw:
     image: wallet:v1
     entrypoint: ["/app/withdraw"]
+    env_file: *env_file
     environment: 
       <<: *env
       TZ: Asia/Shanghai
     depends_on: [api, sign] #启动withdraw服务前，确保api,sign服务已经启动
     volumes:
       - ./log:/app/log
-      #  添加这一行：将本地的 .env 挂载到容器内的工作目录
-      - ./.env:/app/.env 
     networks: [wallet]
 
   sweep:
     image: wallet:v1
     entrypoint: ["/app/sweep"]
+    env_file: *env_file
     environment: 
       <<: *env
       TZ: Asia/Shanghai
     depends_on: [api, sign] #启动sweep服务前，确保api,sign服务已经启动
     volumes:
       - ./log:/app/log      
-      #添加这一行：将本地的 .env 挂载到容器内的工作目录
-      - ./.env:/app/.env 
     networks: [wallet]
 
 volumes:

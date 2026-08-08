@@ -9,7 +9,7 @@ build:
 	@mkdir -p bin
 	@for b in $(BINARIES); do \
 		echo "building $$b"; \
-		CGO_ENABLED=0 $(GO) build -trimpath -o bin/$$b ./cmd/$$b || exit 1; \
+		CGO_ENABLED=0 GOOS=linux $(GO) build -trimpath -o bin/$$b ./control/$$b || exit 1; \
 	done
 
 fmt:
@@ -30,10 +30,11 @@ tidy:
 # Applies the schema through AutoMigrate. Production should apply
 # deploy/migrations/*.sql instead so index changes stay reviewable.
 migrate:
-	$(GO) run ./cmd/api -migrate
+	$(GO) run ./control/api -migrate
 
-docker:
-	docker compose build
+# The image only copies bin/, so the binaries must be built first.
+docker: build
+	docker build -t wallet:v1 .
 
 clean:
 	rm -rf bin

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -229,5 +230,68 @@ func TestCommittedNileConfigLoads(t *testing.T) {
 	}
 	if cfg.Energy.AutoTopup.Enabled {
 		t.Fatal("auto topup must stay disabled in the committed config")
+	}
+}
+
+// An env value carrying yaml metacharacters must stay a plain string instead of
+// breaking the document: a mnemonic or a password with quotes, '#' or a newline
+// used to make the whole file fail with "did not find expected key".
+func TestLoadEnvValueWithYAMLMetacharacters(t *testing.T) {
+	t.Setenv("TEST_WALLET_DSN", "user:p\"a#ss\nword@tcp(127.0.0.1:3306)/wallet")
+	t.Setenv("TEST_NODE_ENDPOINT", "http://node:8090 # not a comment")
+	cfg, err := Load(writeConfig(t, `
+mysql:
+  dsn: "${TEST_WALLET_DSN}"
+chain:
+  nodes:
+    - name: fullnode
+      endpoint: "${TEST_NODE_ENDPOINT}"
+      enabled: true
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MySQL.DSN != "user:p\"a#ss\nword@tcp(127.0.0.1:3306)/wallet" {
+		t.Fatalf("dsn = %q, want the raw environment value", cfg.MySQL.DSN)
+	}
+	if cfg.Chain.Nodes[0].Endpoint != "http://node:8090 # not a comment" {
+		t.Fatalf("endpoint = %q", cfg.Chain.Nodes[0].Endpoint)
+	}
+}
+
+// Plain (unquoted) references must keep their yaml type, so numbers and booleans
+// coming from the environment still decode into int / bool fields.
+func TestLoadPlainEnvReferenceKeepsType(t *testing.T) {
+	t.Setenv("TEST_REDIS_DB", "3")
+	t.Setenv("TEST_NODE_ENABLED", "true")
+	cfg, err := Load(writeConfig(t, `
+mysql:
+  dsn: "dsn"
+redis:
+  db: ${TEST_REDIS_DB}
+chain:
+  nodes:
+    - name: fullnode
+      enabled: ${TEST_NODE_ENABLED}
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Redis.DB != 3 {
+		t.Fatalf("redis db = %d, want 3", cfg.Redis.DB)
+	}
+	if !cfg.Chain.Nodes[0].Enabled {
+		t.Fatal("node must be enabled")
+	}
+}
+
+// A real syntax error must report the offending source line.
+func TestLoadSyntaxErrorMentionsTheLine(t *testing.T) {
+	_, err := Load(writeConfig(t, "mysql:\n  dsn: dsn\n   bad: 1\n"))
+	if err == nil {
+		t.Fatal("expected a parse error")
+	}
+	if !strings.Contains(err.Error(), "bad: 1") {
+		t.Fatalf("error = %v, want the offending line quoted", err)
 	}
 }

@@ -35,6 +35,9 @@ type Pricer struct {
 }
 
 func NewPricer(threshold config.SweepThresholdConfig, energyCfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway, log *logrus.Logger) *Pricer {
+	if log == nil {
+		log = logrus.StandardLogger()
+	}
 	return &Pricer{cfg: threshold, energy: energyCfg, mgr: mgr, gw: gw, log: log, trxUSD: threshold.TRXPriceUSD}
 }
 

@@ -50,3 +50,27 @@ func TestBackoffGrowsAndIsCapped(t *testing.T) {
 		t.Fatalf("backoff(1000) = %v, want at most %v", backoff(1000), maxBackoff)
 	}
 }
+
+// The rocketmq client validates every name server against an IP regex, so a
+// docker compose service name has to be resolved before it is handed over.
+func TestResolveNameServersRewritesHostnames(t *testing.T) {
+	got, err := resolveNameServers([]string{"localhost:9876", "10.0.0.4:9876", "http://ns/rocketmq/nsaddr"})
+	if err != nil {
+		t.Fatalf("resolveNameServers: %v", err)
+	}
+	want := []string{"127.0.0.1:9876", "10.0.0.4:9876", "http://ns/rocketmq/nsaddr"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("addr[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestResolveNameServersRejectsEmptyAndUnresolvable(t *testing.T) {
+	if _, err := resolveNameServers(nil); err == nil {
+		t.Fatal("an empty name server list must be rejected")
+	}
+	if _, err := resolveNameServers([]string{"no-port"}); err == nil {
+		t.Fatal("a name server without a port must be rejected")
+	}
+}

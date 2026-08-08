@@ -77,6 +77,16 @@ wallet:
           contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t # mainnet USDT-TRC20
           decimals: 6
           enabled: true
+    # 系统地址：withdraw 需要 hot_wallet 的 address+path，sweep 需要 finance_wallet
+    hot_wallet:
+        address: "${HOT_WALLET_ADDRESS}"
+        path: "m/44'/195'/1'/0/0"
+    finance_wallet:
+        address: "${FINANCE_WALLET_ADDRESS}"
+        path: "m/44'/195'/2'/0/0"
+    gas_account:
+        address: "${GAS_ACCOUNT_ADDRESS}"
+        path: "m/44'/195'/3'/0/0"
 
 deposit:
     start_block: 0 # 0 means start from the current head
@@ -121,8 +131,9 @@ energy:
     mode: cheapest
     default_period: 1h
     providers:
-        #trx_burn:
-        #    enabled: true
+        # trx_burn 是唯一不需要外部凭据的兜底方式：其他 provider 全部失败时烧 TRX。
+        trx_burn:
+            enabled: true
         gasstation:
             enabled: true
             options:

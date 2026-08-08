@@ -62,6 +62,16 @@ wallet:
       contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t   # mainnet USDT-TRC20
       decimals: 6
       enabled: true
+  # withdraw needs hot_wallet address+path, sweep needs finance_wallet.
+  hot_wallet:
+    address: "${HOT_WALLET_ADDRESS}"
+    path: "m/44'/195'/1'/0/0"
+  finance_wallet:
+    address: "${FINANCE_WALLET_ADDRESS}"
+    path: "m/44'/195'/2'/0/0"
+  gas_account:
+    address: "${GAS_ACCOUNT_ADDRESS}"
+    path: "m/44'/195'/3'/0/0"
 
 energy:
   # Real comparison shopping across the enabled providers, burning TRX only

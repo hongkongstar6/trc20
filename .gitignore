@@ -6,6 +6,8 @@ configs/config.mainnet*
 *.pem
 *.key
 *.crt
-etc/
+# Dockerfile 里有 COPY etc/ /app/etc/，所以目录本身要存在（.gitkeep），
+# 里面的证书/私钥由上面的 *.pem/*.key/*.crt 规则忽略。
+etc/**/*.p12
 log/*
 

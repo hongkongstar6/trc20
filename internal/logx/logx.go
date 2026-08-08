@@ -3,6 +3,7 @@
 package logx
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -38,10 +39,15 @@ import (
 //		return l
 //	}
 func InitLogrus(cfg config.LogConfig, name string) {
-	dir := strings.TrimSpace(cfg.LogDir)
-	dw := newDailyWriter(dir, name)
+	// An empty log_dir means stdout only; an unwritable directory (a bind mount
+	// owned by another uid, for instance) degrades to stdout instead of turning
+	// every record into a writer error.
+	var out io.Writer = os.Stdout
+	if dir := strings.TrimSpace(cfg.LogDir); dir != "" {
+		out = fileWriter(dir, name)
+	}
 
-	logrus.SetOutput(dw)
+	logrus.SetOutput(out)
 	logrus.SetReportCaller(true) //显示行号和函数名
 	logrus.SetFormatter(&formatter{})
 	logrus.SetLevel(logrusLevel(level(cfg.Level)))

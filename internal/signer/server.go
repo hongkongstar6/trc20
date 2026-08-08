@@ -17,45 +17,50 @@ import (
 // NewHTTPServer exposes the signing service. The handler is deliberately tiny:
 // authentication, then policy, then sign. Everything else lives elsewhere so
 // this process links as little code as possible.
-func NewHTTPServer(svc *Service, token string) *gin.Engine {
-	r := gin.New()
+func InitRouter(r *gin.Engine, svc *Service, token string) {
 	r.HandleMethodNotAllowed = true
 	r.Use(gin.Recovery())
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
 	v1 := r.Group("/v1", authorize(token))
-	v1.POST("/sign", func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
-		var req SignRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		resp, err := svc.Sign(c.Request.Context(), &req, callerOf(c))
-		if err != nil {
-			logrus.Warn("sign rejected", "purpose", req.Purpose, "address", req.Address, "err", err)
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, resp)
-	})
-	v1.POST("/derive", func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<16)
-		var req struct {
-			Path string `json:"path"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		addr, err := svc.DeriveAddress(req.Path)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"address": addr, "path": req.Path})
-	})
-	return r
+	v1.POST("/sign", svc.Sign1)
+	v1.POST("/derive", svc.Derive)
+
+}
+
+// v1/sign
+func (svc *Service) Sign1(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	var req SignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := svc.Sign(c.Request.Context(), &req, callerOf(c))
+	if err != nil {
+		logrus.Warn("sign rejected", "purpose", req.Purpose, "address", req.Address, "err", err)
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (svc *Service) Derive(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<16)
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	addr, err := svc.DeriveAddress(req.Path)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"address": addr, "path": req.Path})
+
 }
 
 func authorize(token string) gin.HandlerFunc {

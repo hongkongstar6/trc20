@@ -71,7 +71,7 @@ chain:
     broadcast_timeout: 15s
 
 wallet:
-    account_path: "m/44'/195'/0'/0"
+    account_path: "m/44'/195'/0'/0" #TRON的币种编号是195,第一个0:主账户第几个,第二个0:收款,第三个0:第几个子账户，m/44'/60'/0'/0/0
     tokens:
         - symbol: USDT
           contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t # mainnet USDT-TRC20

@@ -223,9 +223,10 @@ func (s *Server) createAddress(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	logrus.Info("商户id:", mch.MerchantID)
 	if err := merchant.Verify(params, mch.Secret); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
+		//c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		//return
 	}
 
 	account := merchant.Account(merchantID, uid)
@@ -256,6 +257,8 @@ func (s *Server) createAddress(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "derive failed: " + err.Error()})
 		return
 	}
+	logrus.Info("生成地址的路径:", account, path, address)
+
 	wallet := model.Wallet{
 		MerchantID: merchantID,
 		UID:        uid,

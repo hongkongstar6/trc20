@@ -100,12 +100,12 @@ func (s *Store) Lock(ctx context.Context, key string, ttl time.Duration) (func()
 
 // NextAddressIndex atomically reserves the next derivation index for a chain.
 // The uid is deliberately not used as the index.
+// 表wallet_index_allocator 记录路径index
 func (s *Store) NextAddressIndex(ctx context.Context, chain string) (int64, error) {
 	var index int64
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var alloc model.WalletIndexAllocator
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("chain = ?", chain).Take(&alloc).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("chain = ?", chain).Take(&alloc).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			alloc = model.WalletIndexAllocator{Chain: chain, NextIndex: 0}
 			if err := tx.Create(&alloc).Error; err != nil {

@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 
+	"github.com/gin-gonic/gin"
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/signer"
@@ -30,8 +31,10 @@ func main() {
 		logrus.Error("sign service init failed", "err", err)
 		return
 	}
-	r := signer.NewHTTPServer(svc, config.Cfg.Sign.Token)
+	r := gin.New()
+	signer.InitRouter(r, svc, config.Cfg.Sign.Token)
 	logrus.Info("sign-service listening", "addr", config.Cfg.Sign.Listen, "mtls", config.Cfg.Sign.TLS.Enabled)
+
 	if !config.Cfg.Sign.TLS.Enabled {
 		if err := r.Run(config.Cfg.Sign.Listen); err != nil {
 			logrus.Error("sign server stopped", "err", err)

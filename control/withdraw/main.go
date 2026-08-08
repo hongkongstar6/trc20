@@ -13,7 +13,6 @@ import (
 )
 
 func main() {
-
 	app, err := bootstrap.Init("withdraw-worker")
 	if err != nil {
 		panic(err)

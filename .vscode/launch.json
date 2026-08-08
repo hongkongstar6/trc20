@@ -6,7 +6,7 @@
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/cmd/api",
+      "program": "${workspaceFolder}/control/api",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
@@ -16,7 +16,7 @@
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/cmd/scanner",
+      "program": "${workspaceFolder}/control/scanner",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
@@ -26,7 +26,7 @@
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/cmd/withdraw",
+      "program": "${workspaceFolder}/control/withdraw",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
@@ -36,7 +36,7 @@
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/cmd/sweep",
+      "program": "${workspaceFolder}/control/sweep",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]
@@ -46,7 +46,7 @@
       "type": "go",
       "request": "launch",
       "mode": "debug",
-      "program": "${workspaceFolder}/cmd/sign",
+      "program": "${workspaceFolder}/control/sign",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "args": ["-migrate", "-config", "${workspaceFolder}/configs/config.yaml"]

@@ -40,16 +40,20 @@ func Init(service string) (*App, error) {
 
 	cfg, err := config.Load(*path)
 	if err != nil {
+		logrus.Error("load config failed,", ",err:", err)
 		return nil, err
 	}
 	// Assign the loaded config to the global variable
 	logx.InitLogrus(cfg.Log, service)
+	logrus.Infof("Config: %+v", cfg)
 	st, err := store.Open() //数据库
 	if err != nil {
+		logrus.Error("DB failed,", ",err:", err)
 		return nil, err
 	}
 	if *migrate {
 		if err := st.AutoMigrate(); err != nil {
+			logrus.Error("schema migration failed,", ",err:", err)
 			return nil, err
 		}
 		logrus.Info("schema migrated")
@@ -57,6 +61,7 @@ func Init(service string) (*App, error) {
 	}
 	gw, err := chain.NewGateway(cfg.Chain)
 	if err != nil {
+		logrus.Error("chain gateway init failed,", ",err:", err)
 		return nil, err
 	}
 	return &App{Gateway: gw}, nil

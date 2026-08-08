@@ -287,7 +287,6 @@ func Load(path string) (*Config, error) {
 	if err := Cfg.validate(); err != nil {
 		return nil, err
 	}
-
 	return Cfg, nil
 }
 

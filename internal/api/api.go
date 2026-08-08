@@ -259,7 +259,7 @@ func (s *Server) createAddress(c *gin.Context) {
 	wallet := model.Wallet{
 		MerchantID: merchantID,
 		UID:        uid,
-		Account:    &account,
+		Account:    account,
 		Chain:      "TRON",
 		ChainIdx:   "TRON",
 		Address:    address,

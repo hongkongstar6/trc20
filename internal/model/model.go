@@ -65,7 +65,7 @@ type Wallet struct {
 	// Account is merchant_id + "_" + uid, the unique account a deposit address
 	// is allocated for: the same uid under two merchants is two accounts.
 	// Platform owned wallets (hot, finance, gas) leave it NULL.
-	Account    *string   `gorm:"size:128;uniqueIndex" json:"account"`
+	Account    string    `gorm:"size:128;uniqueIndex" json:"account"`
 	Chain      string    `gorm:"size:16" json:"chain"`
 	Address    string    `gorm:"size:64;uniqueIndex" json:"address"`
 	AddrIndex  int64     `gorm:"column:addr_index;uniqueIndex:uq_chain_index,priority:2" json:"addr_index"`

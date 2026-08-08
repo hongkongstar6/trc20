@@ -3,7 +3,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 
 func main() {
 	pwd, _ := os.Getwd()
-	fmt.Println("sweep 当前工作目录:", pwd)
+	logrus.Println("sweep 当前工作目录:", pwd)
 
 	app, err := bootstrap.Init("sweep-service")
 	if err != nil {

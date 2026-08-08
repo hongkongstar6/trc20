@@ -22,6 +22,8 @@ services:
       retries: 20
     networks: [wallet]
 
+
+
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
@@ -48,7 +50,7 @@ services:
     image: wallet:v1
     entrypoint: ["/app/sign"]
     environment: &env
-      CONFIG_PATH: /app/configs/config.nile.yaml
+      CONFIG_PATH: /app/configs/config.yaml
       MYSQL_DSN: "wallet:${MYSQL_PASSWORD:-wallet}@tcp(mysql:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
       SIGN_ENDPOINT: http://sign:8090
@@ -72,10 +74,14 @@ services:
   api:
     image: wallet:v1
     entrypoint: ["/bin/sh", "-c", "/app/api -migrate && exec /app/api"]
-    environment: *env
+    environment: 
+      <<: *env
+      TZ: Asia/Shanghai
     ports: ["8080:8080"]
     depends_on:
       mysql: {condition: service_healthy}
+
+      
     volumes:
       - ./log:/app/log
     networks: [wallet]
@@ -83,7 +89,9 @@ services:
   scanner:
     image: wallet:v1
     entrypoint: ["/app/scanner"]
-    environment: *env
+    environment: 
+      <<: *env
+      TZ: Asia/Shanghai
     depends_on: [api]
     volumes:
       - ./log:/app/log
@@ -92,7 +100,9 @@ services:
   withdraw:
     image: wallet:v1
     entrypoint: ["/app/withdraw"]
-    environment: *env
+    environment: 
+      <<: *env
+      TZ: Asia/Shanghai
     depends_on: [api, sign] #启动withdraw服务前，确保api,sign服务已经启动
     volumes:
       - ./log:/app/log
@@ -101,7 +111,9 @@ services:
   sweep:
     image: wallet:v1
     entrypoint: ["/app/sweep"]
-    environment: *env
+    environment: 
+      <<: *env
+      TZ: Asia/Shanghai
     depends_on: [api, sign] #启动sweep服务前，确保api,sign服务已经启动
     volumes:
       - ./log:/app/log

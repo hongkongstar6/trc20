@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
@@ -14,14 +13,16 @@ import (
 )
 
 func main() {
-	pwd, _ := os.Getwd()
-	fmt.Println("withdraw 当前工作目录:", pwd)
+
 	app, err := bootstrap.Init("withdraw-worker")
 	if err != nil {
 		panic(err)
 	}
 	ctx, stop := bootstrap.Context()
 	defer stop()
+
+	pwd, _ := os.Getwd()
+	logrus.Println("withdraw 当前工作目录:", pwd)
 
 	signClient, err := app.SignerClient()
 	if err != nil {

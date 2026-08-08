@@ -242,18 +242,20 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 
 func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason string) error {
 	now := time.Now()
-	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&model.WithdrawRecord{}).
-			Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
-			UpdateColumns(map[string]any{
-				"status": model.WithdrawStateRejected, "fail_reason": reason, "updated_at": now,
-			})
-		if res.Error != nil || res.RowsAffected == 0 {
-			return res.Error
-		}
-		logrus.Warn("withdraw rejected", "biz_order_no", row.BizOrderNo, "reason", reason)
-		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", w.event(row, "rejected", reason, now))
-	})
+	return store.MyStore.DB.WithContext(ctx).Transaction(
+		func(tx *gorm.DB) error {
+			res := tx.Model(&model.WithdrawRecord{}).
+				Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
+				UpdateColumns(map[string]any{
+					"status": model.WithdrawStateRejected, "fail_reason": reason, "updated_at": now,
+				})
+			if res.Error != nil || res.RowsAffected == 0 {
+				return res.Error
+			}
+			logrus.Warn("withdraw rejected", "biz_order_no", row.BizOrderNo, "reason", reason)
+			return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", w.event(row, "rejected", reason, now))
+		},
+	)
 }
 
 // Reconcile settles broadcast withdrawals and notifies the business system

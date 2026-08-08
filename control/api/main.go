@@ -4,7 +4,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/hongkongstar6/trc20/internal/api"
@@ -15,8 +14,6 @@ import (
 )
 
 func main() {
-	pwd, _ := os.Getwd()
-	fmt.Println("api 当前工作目录:", pwd)
 	app, err := bootstrap.Init("wallet-api")
 	if err != nil {
 		panic(err)
@@ -24,12 +21,14 @@ func main() {
 	ctx, stop := bootstrap.Context()
 	defer stop()
 
+	pwd, _ := os.Getwd()
+	logrus.Println("api 当前工作目录:", pwd)
+
 	signClient, err := app.SignerClient()
 	if err != nil {
 		logrus.Error("sign client init failed", "err", err)
 		return
 	}
-	logrus.Infoln("abcd")
 	// The merchant publisher is always on: a deposit is notified to the
 	// callback URL of the merchant owning the address.
 	publishers := []outbox.Publisher{outbox.NewMerchantPublisher(config.Cfg.Notify)}
@@ -39,7 +38,8 @@ func main() {
 	if config.Cfg.Notify.RocketMQ.Enabled {
 		mq, err := outbox.NewRocketMQPublisher(config.Cfg.Notify)
 		if err != nil {
-			logrus.Error("rocketmq publisher init failed", "err", err)
+			logrus.Infof("配置: %+v", config.Cfg.Notify)
+			logrus.Error("rocketmq publisher init failed", "err:", err)
 			return
 		}
 		defer mq.Close()

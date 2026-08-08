@@ -3,7 +3,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
@@ -13,14 +12,16 @@ import (
 )
 
 func main() {
-	pwd, _ := os.Getwd()
-	fmt.Println("scanner 当前工作目录:", pwd)
+
 	app, err := bootstrap.Init("deposit-scanner")
 	if err != nil {
 		panic(err)
 	}
 	ctx, stop := bootstrap.Context()
 	defer stop()
+
+	pwd, _ := os.Getwd()
+	logrus.Println("scanner 当前工作目录:", pwd)
 
 	s := scanner.New(app.Gateway)
 	logrus.Info("deposit scanner starting",

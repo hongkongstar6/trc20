@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 
@@ -19,12 +18,13 @@ import (
 )
 
 func main() {
-	pwd, _ := os.Getwd()
-	fmt.Println("sign 当前工作目录:", pwd)
 	_, err := bootstrap.Init("sign-service")
 	if err != nil {
 		panic(err)
 	}
+	pwd, _ := os.Getwd()
+	logrus.Println("sign 当前工作目录:", pwd)
+
 	policy := signer.PolicyFromConfig()
 	svc, err := signer.New(config.Cfg.Sign, policy, signer.NewDBAudit())
 	if err != nil {
@@ -46,6 +46,7 @@ func main() {
 	// engine serves a TLS listener built here instead.
 	tlsCfg, err := serverTLS(config.Cfg.Sign.TLS.CAFile, config.Cfg.Sign.TLS.CertFile, config.Cfg.Sign.TLS.KeyFile)
 	if err != nil {
+
 		logrus.Error("mTLS setup failed", "err", err)
 		return
 	}

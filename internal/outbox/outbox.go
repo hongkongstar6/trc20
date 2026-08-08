@@ -32,9 +32,7 @@ type Publisher interface {
 }
 
 type Dispatcher struct {
-	cfg config.NotifyConfig
-	//st  *store.Store
-	//log        *logrus.Logger
+	cfg        config.NotifyConfig
 	publishers []Publisher
 }
 

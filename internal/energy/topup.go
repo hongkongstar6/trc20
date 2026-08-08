@@ -49,7 +49,7 @@ func (t *Topup) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		if err := t.check(ctx); err != nil {
-			logrus.Error("provider balance check failed", "err", err)
+			logrus.Error("provider balance check failed", ",err:", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -68,7 +68,7 @@ func (t *Topup) check(ctx context.Context) error {
 		}
 		balance, depositAddr, err := prov.Balance(ctx)
 		if err != nil {
-			logrus.Error("provider balance query failed", "provider", name, "err", err)
+			logrus.Error("provider balance query failed", "provider", name, ",err:", err)
 			continue
 		}
 		if balance >= conf.LowWatermarkTRX {
@@ -81,7 +81,7 @@ func (t *Topup) check(ctx context.Context) error {
 			continue
 		}
 		if err := t.refill(ctx, name, conf, balance, depositAddr); err != nil {
-			logrus.Error("provider topup failed", "provider", name, "err", err)
+			logrus.Error("provider topup failed", "provider", name, ",err:", err)
 		}
 	}
 	return nil
@@ -96,7 +96,7 @@ func (t *Topup) checkGasAccount(ctx context.Context) {
 	}
 	sun, err := t.gw.GetTRXBalance(ctx, t.cfg.SourceAddress)
 	if err != nil {
-		logrus.Error("gas account balance query failed", "err", err)
+		logrus.Error("gas account balance query failed", ",err:", err)
 		return
 	}
 	trx := float64(sun) / 1e6

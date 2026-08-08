@@ -227,7 +227,7 @@ func (m *Manager) wait(ctx context.Context, provider Provider, row *model.Energy
 	for time.Now().Before(deadline) {
 		order, err := provider.Poll(ctx, pollKey)
 		if err != nil {
-			logrus.Warn("poll energy order failed", "provider", provider.Name(), "order", pollKey, "err", err)
+			logrus.Warn("poll energy order failed", "provider", provider.Name(), "order", pollKey, ",err:", err)
 		} else {
 			last = order
 			switch order.State {
@@ -284,7 +284,7 @@ func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder,
 	}
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
 		Where("id = ?", row.ID).UpdateColumns(updates).Error; err != nil {
-		logrus.Error("update energy order failed", "id", row.ID, "err", err)
+		logrus.Error("update energy order failed", "id", row.ID, ",err:", err)
 	}
 	row.Status = model.EnergyOrderDelegated
 }

@@ -26,7 +26,7 @@ func main() {
 
 	signClient, err := app.SignerClient()
 	if err != nil {
-		logrus.Error("sign client init failed", "err", err)
+		logrus.Error("sign client init failed", ",err:", err)
 		return
 	}
 	// The merchant publisher is always on: a deposit is notified to the
@@ -48,13 +48,13 @@ func main() {
 	dispatcher := outbox.NewDispatcher(config.Cfg.Notify, publishers...)
 	go func() {
 		if err := dispatcher.Run(ctx); err != nil {
-			logrus.Error("outbox dispatcher stopped", "err", err)
+			logrus.Error("outbox dispatcher stopped", ",err:", err)
 		}
 	}()
 
 	r := api.New(signClient).Router()
 	logrus.Info("wallet-api listening", "addr", config.Cfg.API.Listen)
 	if err := r.Run(config.Cfg.API.Listen); err != nil {
-		logrus.Error("http server stopped", "err", err)
+		logrus.Error("http server stopped", ",err:", err)
 	}
 }

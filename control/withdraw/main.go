@@ -26,27 +26,27 @@ func main() {
 
 	signClient, err := app.SignerClient()
 	if err != nil {
-		logrus.Error("sign client init failed", "err", err)
+		logrus.Error("sign client init failed ", ",err:", err)
 		return
 	}
 	mgr, err := app.EnergyManager()
 	if err != nil {
-		logrus.Error("energy manager init failed", "err", err)
+		logrus.Error("energy manager init failed,", "err:", err)
 		return
 	}
 	pool := energy.NewPool(config.Cfg.Energy, mgr, app.Gateway, nil, config.Cfg.Wallet.HotWallet.Address)
 	go func() {
 		if err := pool.Run(ctx); err != nil {
-			logrus.Error("energy pool stopped", "err", err)
+			logrus.Error("energy pool stopped,", ",err:", err)
 		}
 	}()
 
 	worker, err := withdraw.New(store.MyStore, app.Gateway, signClient, mgr, pool, nil)
 	if err != nil {
-		logrus.Error("withdraw worker init failed", "err", err)
+		logrus.Error("withdraw worker init failed,", ",err:", err)
 		return
 	}
 	if err := worker.Run(ctx); err != nil {
-		logrus.Error("withdraw worker stopped", "err", err)
+		logrus.Error("withdraw worker stopped,", ",err:", err)
 	}
 }

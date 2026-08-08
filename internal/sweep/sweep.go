@@ -64,7 +64,7 @@ func (s *Service) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		if err := s.round(ctx); err != nil {
-			s.log.Error("sweep round failed", "err", err)
+			s.log.Error("sweep round failed", ",err:", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -84,7 +84,7 @@ func (s *Service) round(ctx context.Context) error {
 	for _, addr := range candidates {
 		balance, err := s.tokenBalance(ctx, addr.Address)
 		if err != nil {
-			s.log.Error("balance query failed", "address", addr.Address, "err", err)
+			s.log.Error("balance query failed", "address", addr.Address, ",err:", err)
 			continue
 		}
 		if balance.Sign() <= 0 {
@@ -94,7 +94,7 @@ func (s *Service) round(ctx context.Context) error {
 			continue
 		}
 		if err := s.sweepOne(ctx, addr, balance); err != nil {
-			s.log.Error("sweep failed", "address", addr.Address, "err", err)
+			s.log.Error("sweep failed", "address", addr.Address, ",err:", err)
 		}
 	}
 	return nil
@@ -225,7 +225,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.Wallet, amount *big
 
 	need, err := s.mgr.EstimateEnergy(ctx, wallet.Address, s.token.Contract, data)
 	if err != nil {
-		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, "err", err)
+		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, ",err:", err)
 		need = config.Cfg.Energy.EnergyPerTxNew
 	}
 	requestID := fmt.Sprintf("sweep-%d", record.ID)
@@ -303,7 +303,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 				UpdateColumns(map[string]any{"swept": true, "updated_at": now}).Error
 		})
 		if err != nil {
-			s.log.Error("sweep reconcile failed", "id", row.ID, "err", err)
+			s.log.Error("sweep reconcile failed", "id", row.ID, ",err:", err)
 		}
 	}
 	return nil

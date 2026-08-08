@@ -70,7 +70,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 				return nil
 			}
 			// A node outage must stall the cursor, never skip blocks.
-			logrus.Error("scan tick failed", "err", err)
+			logrus.Error("scan tick failed", ",err:", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -90,7 +90,7 @@ func (s *Scanner) tick(ctx context.Context) error {
 		return err
 	}
 	if err := s.confirmUpTo(ctx, head.Number()); err != nil {
-		logrus.Error("confirm pass failed", "err", err)
+		logrus.Error("confirm pass failed", ",err:", err)
 	}
 
 	from := cursor.BlockNumber + 1
@@ -303,7 +303,7 @@ func (s *Scanner) confirmUpTo(ctx context.Context, head int64) error {
 	for i := range pending {
 		rec := pending[i]
 		if err := s.confirmOne(ctx, rec, head); err != nil {
-			logrus.Error("confirm deposit failed", "txid", rec.TxID, "event_index", rec.EventIndex, "err", err)
+			logrus.Error("confirm deposit failed", "txid", rec.TxID, "event_index", rec.EventIndex, ",err:", err)
 		}
 	}
 	return nil

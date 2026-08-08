@@ -63,10 +63,10 @@ func (w *Worker) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		if err := w.processCreated(ctx); err != nil {
-			logrus.Error("withdraw process failed", "err", err)
+			logrus.Error("withdraw process failed", ",err:", err)
 		}
 		if err := w.Reconcile(ctx); err != nil {
-			logrus.Error("withdraw reconcile failed", "err", err)
+			logrus.Error("withdraw reconcile failed", ",err:", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -87,7 +87,7 @@ func (w *Worker) processCreated(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.execute(ctx, &row); err != nil {
-			logrus.Error("withdraw execute failed", "biz_order_no", row.BizOrderNo, "err", err)
+			logrus.Error("withdraw execute failed", "biz_order_no", row.BizOrderNo, ",err:", err)
 		}
 	}
 	return nil
@@ -121,14 +121,14 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	// fails the transaction with OUT_OF_ENERGY while still paying the fee.
 	need, err := w.mgr.EstimateEnergy(ctx, hot.Address, w.token.Contract, data)
 	if err != nil {
-		logrus.Warn("withdraw energy estimate failed, using worst case", "err", err)
+		logrus.Warn("withdraw energy estimate failed, using worst case", ",err:", err)
 		need = config.Cfg.Energy.EnergyPerTxNew
 	}
 	if w.pool != nil && !w.pool.HasEnergyFor(ctx, need) {
 		requestID := fmt.Sprintf("withdraw-%d", row.ID)
 		if _, err := w.mgr.Acquire(ctx, "hot_pool", hot.Address, need, requestID); err != nil {
 			// Not fatal: the transaction burns TRX instead of stalling.
-			logrus.Error("withdraw energy rental failed, falling back to burning TRX", "err", err)
+			logrus.Error("withdraw energy rental failed, falling back to burning TRX", ",err:", err)
 		}
 	}
 
@@ -275,7 +275,7 @@ func (w *Worker) Reconcile(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.reconcileOne(ctx, row, head.Number()); err != nil {
-			logrus.Error("reconcile withdraw failed", "biz_order_no", row.BizOrderNo, "err", err)
+			logrus.Error("reconcile withdraw failed", "biz_order_no", row.BizOrderNo, ",err:", err)
 		}
 	}
 	return nil

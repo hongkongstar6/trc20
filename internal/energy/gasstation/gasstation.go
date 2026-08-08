@@ -43,7 +43,7 @@ const (
 )
 
 func init() {
-	energy.Register(Name, func(conf config.ProviderConf) (energy.Provider, error) {
+	f := func(conf config.ProviderConf) (energy.Provider, error) {
 		appID := energy.Option(conf, "app_id", "")
 		secret := energy.Option(conf, "app_secret", "")
 		if appID == "" || secret == "" {
@@ -67,7 +67,9 @@ func init() {
 				"1d":  energy.Option(conf, "period_1d", "30001"),
 			},
 		}, nil
-	})
+	}
+
+	energy.Register(Name, f)
 }
 
 type Provider struct {

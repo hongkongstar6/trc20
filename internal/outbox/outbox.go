@@ -47,7 +47,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	for {
 		n, err := d.drainOnce(ctx)
 		if err != nil {
-			logrus.Error("outbox drain failed", "err", err)
+			logrus.Error("outbox drain failed", ",err:", err)
 		}
 		if n > 0 {
 			continue // keep draining while there is a backlog
@@ -96,7 +96,7 @@ func (d *Dispatcher) deliver(ctx context.Context, row *model.NotifyOutbox) {
 		// Dead lettered events stay in the table and are exposed through the
 		// reconciliation API, so nothing is ever silently dropped.
 		status = model.OutboxStateDead
-		logrus.Error("outbox event dead lettered", "event_id", row.EventID, "err", lastErr)
+		logrus.Error("outbox event dead lettered", "event_id", row.EventID, ",err:", lastErr)
 	}
 	store.MyStore.DB.WithContext(ctx).Model(&model.NotifyOutbox{}).Where("id = ?", row.ID).
 		UpdateColumns(map[string]any{

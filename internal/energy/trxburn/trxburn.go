@@ -15,13 +15,14 @@ import (
 const Name = "trx_burn"
 
 func init() {
-	energy.Register(Name, func(conf config.ProviderConf) (energy.Provider, error) {
+	f := func(conf config.ProviderConf) (energy.Provider, error) {
 		fee, err := strconv.ParseInt(energy.Option(conf, "energy_fee_sun", "100"), 10, 64)
 		if err != nil {
 			return nil, err
 		}
 		return &Provider{energyFeeSun: fee}, nil
-	})
+	}
+	energy.Register(Name, f)
 }
 
 // Provider reports the burn cost so the comparison engine can rank it against

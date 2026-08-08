@@ -40,7 +40,7 @@ const (
 )
 
 func init() {
-	energy.Register(Name, func(conf config.ProviderConf) (energy.Provider, error) {
+	f := func(conf config.ProviderConf) (energy.Provider, error) {
 		apiKey := energy.Option(conf, "api_key", "")
 		if apiKey == "" {
 			return nil, errors.New("tronenergyrent: api_key is required")
@@ -55,7 +55,8 @@ func init() {
 			preActivate: energy.Option(conf, "pre_activate", "0") != "0",
 			http:        &http.Client{Timeout: timeout},
 		}, nil
-	})
+	}
+	energy.Register(Name, f)
 }
 
 type Provider struct {

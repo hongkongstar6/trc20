@@ -27,6 +27,6 @@ func main() {
 	logrus.Info("deposit scanner starting",
 		"confirmations", config.Cfg.Deposit.Confirmations, "batch_blocks", config.Cfg.Deposit.BatchBlocks)
 	if err := s.Run(ctx); err != nil {
-		logrus.Error("scanner stopped", "err", err)
+		logrus.Error("scanner stopped", ",err:", err)
 	}
 }

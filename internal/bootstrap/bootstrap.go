@@ -34,6 +34,7 @@ type App struct {
 // Init loads the config, opens the datastores and builds the chain gateway.
 func Init(service string) (*App, error) {
 	path := flag.String("config", envOr("CONFIG_PATH", defaultConfigPath()), "path to the config file")
+
 	migrate := flag.Bool("migrate", false, "run schema auto migration and exit")
 	flag.Parse()
 
@@ -58,11 +59,7 @@ func Init(service string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{
-		//Cfg: cfg,
-		//Log:   log,
-		//Store: st,
-		Gateway: gw}, nil
+	return &App{Gateway: gw}, nil
 }
 
 // SignerClient builds the sign-service client.

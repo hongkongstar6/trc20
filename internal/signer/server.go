@@ -38,7 +38,7 @@ func (svc *Service) Sign1(c *gin.Context) {
 	}
 	resp, err := svc.Sign(c.Request.Context(), &req, callerOf(c))
 	if err != nil {
-		logrus.Warn("sign rejected", "purpose", req.Purpose, "address", req.Address, "err", err)
+		logrus.Warn("sign rejected", "purpose", req.Purpose, "address", req.Address, ",err:", err)
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
@@ -131,6 +131,6 @@ func (a *dbAudit) Record(ctx context.Context, purpose, path, address, txid, call
 	if err := store.MyStore.DB.WithContext(ctx).Create(row).Error; err != nil {
 		// Audit must never silently vanish, but it must not block signing of a
 		// legitimate request either.
-		logrus.Error("sign audit write failed", "purpose", purpose, "allowed", allowed, "err", err)
+		logrus.Error("sign audit write failed", "purpose", purpose, "allowed", allowed, ",err:", err)
 	}
 }

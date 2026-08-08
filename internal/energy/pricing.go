@@ -42,7 +42,7 @@ func NewPricer(threshold config.SweepThresholdConfig, energyCfg config.EnergyCon
 func (p *Pricer) Run(ctx context.Context) error {
 	interval := config.Duration(p.cfg.RefreshInterval, 10*time.Minute)
 	if err := p.Refresh(ctx); err != nil {
-		p.log.Error("initial threshold refresh failed", "err", err)
+		p.log.Error("initial threshold refresh failed", ",err:", err)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -52,7 +52,7 @@ func (p *Pricer) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := p.Refresh(ctx); err != nil {
-				p.log.Error("threshold refresh failed", "err", err)
+				p.log.Error("threshold refresh failed", ",err:", err)
 			}
 		}
 	}
@@ -100,7 +100,7 @@ func (p *Pricer) Refresh(ctx context.Context) error {
 
 	trxUSD, err := p.trxPrice(ctx)
 	if err != nil {
-		p.log.Warn("trx price lookup failed, using previous value", "err", err)
+		p.log.Warn("trx price lookup failed, using previous value", ",err:", err)
 	}
 	if trxUSD <= 0 {
 		return fmt.Errorf("no TRX price available")

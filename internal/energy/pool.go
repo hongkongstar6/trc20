@@ -45,7 +45,7 @@ func (p *Pool) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		if err := p.topUp(ctx); err != nil {
-			logrus.Error("energy pool top up failed", "err", err)
+			logrus.Error("energy pool top up failed", ",err:", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -79,7 +79,7 @@ func (p *Pool) topUp(ctx context.Context) error {
 	order, err := p.mgr.Acquire(ctx, "hot_pool", p.addr, need, requestID)
 	if err != nil {
 		// Withdrawals stay possible: the transaction simply burns TRX.
-		logrus.Error("hot wallet energy rental failed, withdrawals will burn TRX", "err", err)
+		logrus.Error("hot wallet energy rental failed, withdrawals will burn TRX", ",err:", err)
 		return err
 	}
 	logrus.Info("hot wallet energy batch delegated",

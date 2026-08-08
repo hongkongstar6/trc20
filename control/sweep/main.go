@@ -17,9 +17,6 @@ import (
 //归集
 
 func main() {
-	pwd, _ := os.Getwd()
-	logrus.Println("sweep 当前工作目录:", pwd)
-
 	app, err := bootstrap.Init("sweep-service")
 	if err != nil {
 		panic(err)
@@ -27,20 +24,23 @@ func main() {
 	ctx, stop := bootstrap.Context()
 	defer stop()
 
+	pwd, _ := os.Getwd()
+	logrus.Println("sweep 当前工作目录:", pwd)
+
 	signClient, err := app.SignerClient()
 	if err != nil {
-		logrus.Error("sign client init failed", "err", err)
+		logrus.Error("sign client init failed", ",err:", err)
 		return
 	}
 	mgr, err := app.EnergyManager()
 	if err != nil {
-		logrus.Error("energy manager init failed", "err", err)
+		logrus.Error("energy manager init failed ", ",err:", err)
 		return
 	}
 	pricer := energy.NewPricer(config.Cfg.Sweep.Threshold, config.Cfg.Energy, mgr, app.Gateway, nil)
 	go func() {
 		if err := pricer.Run(ctx); err != nil {
-			logrus.Error("pricer stopped", "err", err)
+			logrus.Error("pricer stopped", ",err:", err)
 		}
 	}()
 
@@ -48,13 +48,13 @@ func main() {
 		mgr.Providers(), config.Cfg.Wallet.GasAccount.Path)
 	go func() {
 		if err := topup.Run(ctx); err != nil {
-			logrus.Error("topup loop stopped", "err", err)
+			logrus.Error("topup loop stopped", ",err:", err)
 		}
 	}()
 
 	svc, err := sweep.New(app.Gateway, signClient, mgr, pricer)
 	if err != nil {
-		logrus.Error("sweep init failed", "err", err)
+		logrus.Error("sweep init failed", ",err:", err)
 		return
 	}
 	go func() {
@@ -66,16 +66,16 @@ func main() {
 				return
 			case <-ticker.C:
 				if err := svc.Reconcile(ctx); err != nil {
-					logrus.Error("sweep reconcile failed", "err", err)
+					logrus.Error("sweep reconcile failed", ",err:", err)
 				}
 				if err := topup.Reconcile(ctx); err != nil {
-					logrus.Error("topup reconcile failed", "err", err)
+					logrus.Error("topup reconcile failed", ",err:", err)
 				}
 			}
 		}
 	}()
 
 	if err := svc.Run(ctx); err != nil {
-		logrus.Error("sweep stopped", "err", err)
+		logrus.Error("sweep stopped", ",err:", err)
 	}
 }

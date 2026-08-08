@@ -28,7 +28,7 @@ func main() {
 	policy := signer.PolicyFromConfig()
 	svc, err := signer.New(config.Cfg.Sign, policy, signer.NewDBAudit())
 	if err != nil {
-		logrus.Error("sign service init failed", "err", err)
+		logrus.Error("sign service init failed", ",err:", err)
 		return
 	}
 	r := gin.New()
@@ -37,7 +37,7 @@ func main() {
 
 	if !config.Cfg.Sign.TLS.Enabled {
 		if err := r.Run(config.Cfg.Sign.Listen); err != nil {
-			logrus.Error("sign server stopped", "err", err)
+			logrus.Error("sign server stopped", ",err:", err)
 		}
 		return
 	}
@@ -47,16 +47,16 @@ func main() {
 	tlsCfg, err := serverTLS(config.Cfg.Sign.TLS.CAFile, config.Cfg.Sign.TLS.CertFile, config.Cfg.Sign.TLS.KeyFile)
 	if err != nil {
 
-		logrus.Error("mTLS setup failed", "err", err)
+		logrus.Error("mTLS setup failed", ",err:", err)
 		return
 	}
 	ln, err := net.Listen("tcp", config.Cfg.Sign.Listen)
 	if err != nil {
-		logrus.Error("sign listen failed", "err", err)
+		logrus.Error("sign listen failed", ",err:", err)
 		return
 	}
 	if err := r.RunListener(tls.NewListener(ln, tlsCfg)); err != nil {
-		logrus.Error("sign server stopped", "err", err)
+		logrus.Error("sign server stopped", ",err:", err)
 	}
 }
 

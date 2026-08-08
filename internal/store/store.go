@@ -126,17 +126,20 @@ func (s *Store) NextAddressIndex(ctx context.Context, chain string) (int64, erro
 
 // EnqueueOutbox writes an event inside the caller's transaction so the state
 // change and the notification commit atomically.
-func EnqueueOutbox(tx *gorm.DB, eventID, eventType string, payload any) error {
+// merchantID may be empty for platform level events; when set the dispatcher
+// also delivers the event to that merchant's callback URL.
+func EnqueueOutbox(tx *gorm.DB, eventID, eventType, merchantID string, payload any) error {
 	blob, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	row := model.NotifyOutbox{
-		EventID:   eventID,
-		EventType: eventType,
-		Payload:   string(blob),
-		Status:    model.OutboxStatePending,
-		NextRetry: time.Now(),
+		EventID:    eventID,
+		EventType:  eventType,
+		MerchantID: merchantID,
+		Payload:    string(blob),
+		Status:     model.OutboxStatePending,
+		NextRetry:  time.Now(),
 	}
 	// Duplicate event ids are expected on replay and must not be an error.
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error

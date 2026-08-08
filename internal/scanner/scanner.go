@@ -259,6 +259,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 		return nil, false, err
 	}
 	return &model.DepositRecord{
+		MerchantID:  wallet.MerchantID,
 		UID:         wallet.UID,
 		Chain:       "TRON",
 		Symbol:      t.token.symbol,
@@ -347,6 +348,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 		event := map[string]any{
 			"event_id":     depositEventID(rec),
 			"type":         "deposit",
+			"merchant_id":  rec.MerchantID,
 			"uid":          rec.UID,
 			"chain":        rec.Chain,
 			"symbol":       rec.Symbol,
@@ -360,7 +362,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 			"block_number": rec.BlockNumber,
 			"confirmed_at": now.Unix(),
 		}
-		return store.EnqueueOutbox(tx, depositEventID(rec), "deposit", event)
+		return store.EnqueueOutbox(tx, depositEventID(rec), "deposit", rec.MerchantID, event)
 	})
 }
 

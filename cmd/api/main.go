@@ -30,7 +30,9 @@ func main() {
 		return
 	}
 	logrus.Infoln("abcd")
-	var publishers []outbox.Publisher
+	// The merchant publisher is always on: a deposit is notified to the
+	// callback URL of the merchant owning the address.
+	publishers := []outbox.Publisher{outbox.NewMerchantPublisher(config.Cfg.Notify)}
 	if config.Cfg.Notify.HTTP.Enabled {
 		publishers = append(publishers, outbox.NewHTTPPublisher(config.Cfg.Notify))
 	}
@@ -43,16 +45,12 @@ func main() {
 		defer mq.Close()
 		publishers = append(publishers, mq)
 	}
-	if len(publishers) > 0 {
-		dispatcher := outbox.NewDispatcher(config.Cfg.Notify, publishers...)
-		go func() {
-			if err := dispatcher.Run(ctx); err != nil {
-				logrus.Error("outbox dispatcher stopped", "err", err)
-			}
-		}()
-	} else {
-		logrus.Warn("no notify publisher enabled, events will queue in notify_outbox")
-	}
+	dispatcher := outbox.NewDispatcher(config.Cfg.Notify, publishers...)
+	go func() {
+		if err := dispatcher.Run(ctx); err != nil {
+			logrus.Error("outbox dispatcher stopped", "err", err)
+		}
+	}()
 
 	r := api.New(signClient).Router()
 	logrus.Info("wallet-api listening", "addr", config.Cfg.API.Listen)

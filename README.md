@@ -160,6 +160,37 @@ Nile 上它们完全无法使用；它们在主网上以小额交易进行验证
 
 对于生产环境，请使用 KMS/HSM/Vault Transit 而非助记词来保护密钥，并将签名服务部署在独立的网络段上，并使用 mTLS 进行保护。
 
+## 商户
+
+每个用户都归属于一个商户。商户表 `merchant` 的字段为：主键 `id`、商户号
+`merchant_id`、商户名称 `name`、回调地址 `callback_url`、sha256 密钥 `secret`、
+状态 `status`（1 开启 / 0 关闭）。`secret` 只写不读，API 不会返回它。
+
+```bash
+# 新增/更新商户
+POST /v1/merchant  {"merchant_id":"m1","name":"商户一","callback_url":"https://m1/notify","secret":"sfejo","status":1}
+GET  /v1/merchants
+```
+
+申请专属地址时必须带上 `merchant_id`，并对参数签名：参数按 key 升序拼成
+`k1=v1&k2=v2`，末尾接上商户密钥后取 sha256，签名放在 `sign` 字段里（`sign`
+本身与空值不参与签名）。
+
+```text
+参数 {"a":1,"b":2}，secret="sfejo"
+sign = sha256("a=1&b=2sfejo")
+请求体 {"a":1,"b":2,"sign":sign}
+```
+
+地址按「商户号 + 用户 id」唯一分配：`wallet.account = <merchant_id>_<uid>`，
+因此两个商户下的同一个 uid 是两个账号、两个地址。同一账号重复申请会返回
+已分配的地址。
+
+```bash
+POST /v1/address  {"merchant_id":"m1","uid":"1001","sign":"<sha256>"}
+-> {"merchant_id":"m1","uid":"1001","account":"m1_1001","address":"T...","chain":"TRON"}
+```
+
 ## 事件传递
 
 状态变更及其对应的发件箱行写入同一个数据库事务，因此
@@ -168,6 +199,11 @@ Nile 上它们完全无法使用；它们在主网上以小额交易进行验证
 是稳定的——存款事件的 ID 为 `<txid>:<event_index>`——因此业务系统
 会按 ID 进行去重。`/v1/deposits` 和 `/v1/events` 允许重放单个
 事件或时间范围以进行对账。
+
+用户地址收到转账并确认后，事件除了走平台级发布器，还会按 `merchant_id`
+投递到该商户的 `callback_url`：请求体是事件本身加上用商户密钥按同一规则算出的
+`sign`，商户按相同规则验签即可。商户被关闭或未配置回调地址时跳过该商户投递，
+事件仍可通过 `/v1/deposits`、`/v1/events` 对账。
 
 ## 开发
 

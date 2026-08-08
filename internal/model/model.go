@@ -35,13 +35,37 @@ const (
 	TopupStateConfirmed = "confirmed"
 	TopupStateCredited  = "credited"
 	TopupStateFailed    = "failed"
+
+	MerchantStatusOff int8 = 0
+	MerchantStatusOn  int8 = 1
 )
+
+// Merchant is the tenant every user belongs to. Its secret signs both the
+// inbound API parameters and the outbound deposit callbacks, so it never leaves
+// the wallet system and is not serialised in API responses.
+type Merchant struct {
+	ID          int64     `gorm:"primaryKey" json:"id"`
+	MerchantID  string    `gorm:"column:merchant_id;size:64;uniqueIndex" json:"merchant_id"`
+	Name        string    `gorm:"size:64" json:"name"`
+	CallbackURL string    `gorm:"size:255" json:"callback_url"`
+	Secret      string    `gorm:"size:128" json:"-"` // sha256 signing key
+	Status      int8      `json:"status"`            // 1 enabled | 0 disabled
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (Merchant) TableName() string { return "merchant" }
 
 // Wallet is a derived address. Private keys never live here: only the
 // derivation path, which is meaningless without the seed held by sign-service.
 type Wallet struct {
-	ID         int64     `gorm:"primaryKey" json:"id"`
-	UID        string    `gorm:"column:uid;index" json:"uid"`
+	ID         int64  `gorm:"primaryKey" json:"id"`
+	MerchantID string `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
+	UID        string `gorm:"column:uid;index" json:"uid"`
+	// Account is merchant_id + "_" + uid, the unique account a deposit address
+	// is allocated for: the same uid under two merchants is two accounts.
+	// Platform owned wallets (hot, finance, gas) leave it NULL.
+	Account    *string   `gorm:"size:128;uniqueIndex" json:"account"`
 	Chain      string    `gorm:"size:16" json:"chain"`
 	Address    string    `gorm:"size:64;uniqueIndex" json:"address"`
 	AddrIndex  int64     `gorm:"column:addr_index;uniqueIndex:uq_chain_index,priority:2" json:"addr_index"`
@@ -69,6 +93,7 @@ func (WalletIndexAllocator) TableName() string { return "wallet_index_allocator"
 // Uniqueness is (txid, event_index), which is also the downstream event id.
 type DepositRecord struct {
 	ID            int64      `gorm:"primaryKey" json:"id"`
+	MerchantID    string     `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
 	UID           string     `gorm:"column:uid;index" json:"uid"`
 	Chain         string     `gorm:"size:16" json:"chain"`
 	Symbol        string     `gorm:"size:16" json:"symbol"`
@@ -216,8 +241,11 @@ func (BlockSnapshot) TableName() string { return "block_snapshot" }
 // NotifyOutbox is the transactional outbox. A record is written in the same
 // transaction as the state change, then delivered at least once.
 type NotifyOutbox struct {
-	ID         int64      `gorm:"primaryKey" json:"id"`
-	EventID    string     `gorm:"size:96;uniqueIndex" json:"event_id"`
+	ID      int64  `gorm:"primaryKey" json:"id"`
+	EventID string `gorm:"size:96;uniqueIndex" json:"event_id"`
+	// MerchantID routes the event to that merchant's callback URL. Empty means
+	// the event only goes to the platform wide publishers.
+	MerchantID string     `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
 	EventType  string     `gorm:"size:32;index" json:"event_type"`
 	Payload    string     `gorm:"type:text" json:"payload"`
 	Status     string     `gorm:"size:16;index" json:"status"`
@@ -249,6 +277,7 @@ func (SignAudit) TableName() string { return "sign_audit" }
 // AllModels is used by the migration helper.
 func AllModels() []any {
 	return []any{
+		&Merchant{},
 		&Wallet{},
 		&WalletIndexAllocator{},
 		&DepositRecord{},

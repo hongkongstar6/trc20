@@ -33,15 +33,20 @@ services:
 
   rocketmq-namesrv:
     image: apache/rocketmq:5.3.0
+    container_name: rocketmq-namesrv
     command: sh mqnamesrv
     ports: ["9876:9876"]
     networks: [wallet]
 
   rocketmq-broker:
     image: apache/rocketmq:5.3.0
-    command: sh mqbroker -n rocketmq-namesrv:9876 --enable-proxy
+    container_name: rocketmq-broker
+    #command: sh mqbroker -n rocketmq-namesrv:9876 --enable-proxy
+    command: >
+      bash -c "echo 'brokerIP1=127.0.0.1' > /tmp/broker.conf && 
+               sh mqbroker -n rocketmq-namesrv:9876 -c /tmp/broker.conf --enable-proxy"
     environment:
-      NAMESRV_ADDR: rocketmq-namesrv:9876
+      NAMESRV_ADDR: 127.0.0.1:9876 #rocketmq-namesrv:9876
     depends_on: [rocketmq-namesrv]
     ports: ["10911:10911", "8081:8081"]
     networks: [wallet]

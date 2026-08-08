@@ -91,6 +91,7 @@ func (WalletIndexAllocator) TableName() string { return "wallet_index_allocator"
 
 // DepositRecord is one TRC20 Transfer log targeting one of our addresses.
 // Uniqueness is (txid, event_index), which is also the downstream event id.
+//光靠游标还不够，因为进程可能在扫到块、但还没保存游标之前就崩溃/重启，导致同一个块被重扫。为此，DepositRecord 表上以 (txid, event_index) 建了唯一索引 uq_tx_event
 type DepositRecord struct {
 	ID            int64      `gorm:"primaryKey" json:"id"`
 	MerchantID    string     `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
@@ -217,6 +218,7 @@ type TopupRecord struct {
 func (TopupRecord) TableName() string { return "topup_record" }
 
 // ChainCursor is the scanner position. block_hash detects reorgs.
+//游标记录扫描进度,避免重复扫描区块
 type ChainCursor struct {
 	Name        string    `gorm:"size:32;primaryKey" json:"name"`
 	BlockNumber int64     `json:"block_number"`
@@ -227,6 +229,7 @@ type ChainCursor struct {
 func (ChainCursor) TableName() string { return "chain_cursor" }
 
 // BlockSnapshot keeps recent block hashes so a fork point can be located.
+//存区块哈希指纹，用于 reorg 检测/回溯分叉点
 type BlockSnapshot struct {
 	// The block height is the key, so it must not be auto assigned.
 	BlockNumber int64     `gorm:"primaryKey;autoIncrement:false" json:"block_number"`

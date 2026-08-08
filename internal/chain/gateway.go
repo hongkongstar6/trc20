@@ -34,7 +34,7 @@ type node struct {
 
 // Gateway routes JSON HTTP calls to the healthiest node by priority.
 type Gateway struct {
-	nodes            []*node
+	nodes            []node
 	retryPerNode     int
 	solidityConfirm  bool
 	broadcastTimeout time.Duration
@@ -50,7 +50,7 @@ func NewGateway(c config.ChainConfig) (*Gateway, error) {
 		if !nc.Enabled {
 			continue
 		}
-		g.nodes = append(g.nodes, &node{
+		g.nodes = append(g.nodes, node{
 			conf:   nc,
 			client: &http.Client{Timeout: config.Duration(nc.Timeout, 15*time.Second)},
 		})
@@ -119,7 +119,7 @@ func (n *node) do(ctx context.Context, path string, payload []byte) ([]byte, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if n.conf.APIKey != "" {
-		req.Header.Set("TRON-PRO-API-KEY", n.conf.APIKey)
+		req.Header.Set("TRON-PRO-API-KEY", n.conf.APIKey) //扫描波场官方节点需要的key
 	}
 	for k, v := range n.conf.Headers {
 		req.Header.Set(k, v)

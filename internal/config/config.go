@@ -83,6 +83,14 @@ type SignConfig struct {
 	} `yaml:"tls"`
 }
 
+type ChainConfig struct {
+	Nodes []NodeConfig `yaml:"nodes"`
+	// SolidityForConfirm reads confirmed data from the solidity node path.
+	SolidityForConfirm bool   `yaml:"solidity_for_confirm"`
+	RetryPerNode       int    `yaml:"retry_per_node"`
+	BroadcastTimeout   string `yaml:"broadcast_timeout"`
+}
+
 type NodeConfig struct {
 	Name     string            `yaml:"name"`
 	Type     string            `yaml:"type"` // trongrid | fullnode
@@ -92,14 +100,6 @@ type NodeConfig struct {
 	Enabled  bool              `yaml:"enabled"`
 	Headers  map[string]string `yaml:"headers"`
 	Timeout  string            `yaml:"timeout"`
-}
-
-type ChainConfig struct {
-	Nodes []NodeConfig `yaml:"nodes"`
-	// SolidityForConfirm reads confirmed data from the solidity node path.
-	SolidityForConfirm bool   `yaml:"solidity_for_confirm"`
-	RetryPerNode       int    `yaml:"retry_per_node"`
-	BroadcastTimeout   string `yaml:"broadcast_timeout"`
 }
 
 type TokenConfig struct {

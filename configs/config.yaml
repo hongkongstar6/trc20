@@ -50,15 +50,15 @@ sign:
         ca_file: ./etc/wallet/tls/ca.crt
         server_name: sign.internal
 
-chain:
+chain: #扫块配置节点
     # FullNode first once it is ready; TronGrid stays as the failover.
     nodes:
-        - name: fullnode
-          type: fullnode
-          endpoint: "${FULLNODE_ENDPOINT}"
-          priority: 1
-          enabled: true
-          timeout: 10s
+        #- name: fullnode
+        #   type: fullnode
+        #  endpoint: "https://api.trongrid.io" #"${FULLNODE_ENDPOINT}" #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
+        #  priority: 1
+        #  enabled: true
+        #  timeout: 10s
         - name: trongrid
           type: trongrid
           endpoint: https://api.trongrid.io #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
@@ -173,7 +173,7 @@ energy:
                 max_daily_topup_count: 3
                 # Hard whitelist. The address returned by the provider API is compared
                 # against this value before every transfer.
-                deposit_address: "${GASSTATION_DEPOSIT_ADDRESS}"
+                deposit_address: "https://openapi.gasstation.ai" #"${GASSTATION_DEPOSIT_ADDRESS}"
             tronenergyrent:
                 enabled: true
                 low_watermark_trx: 2000
@@ -181,7 +181,7 @@ energy:
                 max_single_topup_trx: 4000
                 max_daily_topup_trx: 8000
                 max_daily_topup_count: 3
-                deposit_address: "${TRONENERGYRENT_DEPOSIT_ADDRESS}"
+                deposit_address: "https://tronenergyrent.com" #"${TRONENERGYRENT_DEPOSIT_ADDRESS}"
 
 notify:
     http:

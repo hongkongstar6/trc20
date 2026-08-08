@@ -53,10 +53,11 @@ func New(gw *chain.Gateway) *Scanner {
 		minUnit = big.NewInt(0)
 	}
 	return &Scanner{
+		gw:     gw,
+		tokens: tokens, minUnit: minUnit,
 		//st: st,
-		gw: gw,
 		//log:    log,
-		tokens: tokens, minUnit: minUnit}
+	}
 }
 
 // Run scans forward continuously until ctx is cancelled.

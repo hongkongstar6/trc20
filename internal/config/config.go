@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -253,6 +255,10 @@ var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`
 // secrets stay outside of the repository. Before expanding it sources a .env
 // file (ENV_FILE, else the nearest .env next to the config or above the working
 // directory) so running from an IDE behaves like docker compose.
+//
+// The yaml is parsed first and the expansion happens on the parsed scalars, so
+// an env value carrying quotes, colons, '#' or newlines can never change the
+// document structure.
 func Load(path string) (*Config, error) {
 	if err := loadEnvFileFor(path); err != nil {
 		return nil, fmt.Errorf("load env file: %w", err)
@@ -261,7 +267,49 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	expanded := envPattern.ReplaceAllStringFunc(string(raw), func(m string) string {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w%s", path, err, sourceHint(raw, err))
+	}
+	if doc.Kind == 0 {
+		return nil, fmt.Errorf("parse config %s: file is empty", path)
+	}
+	expandEnvNode(&doc)
+	var c Config
+	if err := doc.Decode(&c); err != nil {
+		return nil, fmt.Errorf("decode config %s: %w", path, err)
+	}
+	Cfg = &c
+	Cfg.applyDefaults()
+	if err := Cfg.validate(); err != nil {
+		return nil, err
+	}
+	return Cfg, nil
+}
+
+// expandEnvNode substitutes ${ENV} / ${ENV:-default} inside every scalar of the
+// document. Plain scalars drop their resolved tag so "${PORT}" -> 8080 is still
+// decoded as a number, quoted scalars stay strings.
+func expandEnvNode(n *yaml.Node) {
+	if n.Kind == yaml.ScalarNode {
+		v := expandEnvString(n.Value)
+		if v != n.Value {
+			n.Value = v
+			if n.Style == yaml.DoubleQuotedStyle || n.Style == yaml.SingleQuotedStyle {
+				n.Tag = "!!str"
+			} else {
+				n.Tag = ""
+				n.Style = 0
+			}
+		}
+	}
+	for _, child := range n.Content {
+		expandEnvNode(child)
+	}
+}
+
+func expandEnvString(s string) string {
+	return envPattern.ReplaceAllStringFunc(s, func(m string) string {
 		g := envPattern.FindStringSubmatch(m)
 		v, ok := os.LookupEnv(g[1])
 		// ${VAR:-default} follows POSIX semantics: the default applies when the
@@ -279,15 +327,26 @@ func Load(path string) (*Config, error) {
 		}
 		return ""
 	})
-	//var c Config
-	if err := yaml.Unmarshal([]byte(expanded), &Cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+}
+
+var yamlErrLine = regexp.MustCompile(`line (\d+):`)
+
+// sourceHint appends the offending source line to a yaml syntax error, so a
+// "did not find expected key" points at something actionable.
+func sourceHint(raw []byte, err error) string {
+	m := yamlErrLine.FindStringSubmatch(err.Error())
+	if m == nil {
+		return ""
 	}
-	Cfg.applyDefaults()
-	if err := Cfg.validate(); err != nil {
-		return nil, err
+	n, convErr := strconv.Atoi(m[1])
+	if convErr != nil {
+		return ""
 	}
-	return Cfg, nil
+	lines := strings.Split(string(raw), "\n")
+	if n < 1 || n > len(lines) {
+		return ""
+	}
+	return fmt.Sprintf(" (line %d: %q)", n, lines[n-1])
 }
 
 // loadEnvFileFor resolves which .env to source for the given config path.

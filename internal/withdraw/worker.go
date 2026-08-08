@@ -252,7 +252,7 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 			return res.Error
 		}
 		logrus.Warn("withdraw rejected", "biz_order_no", row.BizOrderNo, "reason", reason)
-		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", w.event(row, "rejected", reason, now))
+		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", w.event(row, "rejected", reason, now))
 	})
 }
 
@@ -366,7 +366,7 @@ func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, r
 		if status != model.WithdrawStateConfirmed {
 			outcome = "failed"
 		}
-		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", w.event(&row, outcome, reason, now))
+		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", w.event(&row, outcome, reason, now))
 	})
 }
 

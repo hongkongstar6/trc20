@@ -9,6 +9,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/hongkongstar6/trc20/internal/config"
+	"github.com/hongkongstar6/trc20/internal/merchant"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
 	"github.com/sirupsen/logrus"
@@ -178,6 +180,70 @@ func (p *HTTPPublisher) Publish(ctx context.Context, event *model.NotifyOutbox) 
 }
 
 func (p *HTTPPublisher) Close() error { return nil }
+
+// -------------------------------------------------------- merchant publisher
+
+// MerchantPublisher delivers an event to the callback URL of the merchant that
+// owns it, signed with that merchant's own sha256 secret. Events without a
+// merchant, and merchants that are switched off or have no callback URL, are
+// skipped: they are still delivered by the platform wide publishers.
+type MerchantPublisher struct {
+	client *http.Client
+}
+
+func NewMerchantPublisher(cfg config.NotifyConfig) *MerchantPublisher {
+	return &MerchantPublisher{
+		client: &http.Client{Timeout: config.Duration(cfg.HTTP.Timeout, 10*time.Second)},
+	}
+}
+
+func (p *MerchantPublisher) Name() string { return "merchant" }
+
+func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutbox) error {
+	if event.MerchantID == "" {
+		return nil
+	}
+	mch, err := merchant.Get(ctx, event.MerchantID)
+	if errors.Is(err, merchant.ErrNotFound) {
+		logrus.Warn("merchant callback skipped, merchant unknown", "merchant_id", event.MerchantID)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if mch.Status != model.MerchantStatusOn || mch.CallbackURL == "" {
+		logrus.Warn("merchant callback skipped", "merchant_id", event.MerchantID, "status", mch.Status)
+		return nil
+	}
+	payload, err := merchant.DecodeParams([]byte(event.Payload))
+	if err != nil {
+		return fmt.Errorf("payload is not a json object: %w", err)
+	}
+	body, err := merchant.SignedPayload(payload, mch.Secret)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, mch.CallbackURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Event-Id", event.EventID)
+	req.Header.Set("X-Event-Type", event.EventType)
+	req.Header.Set("X-Merchant-Id", event.MerchantID)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(raw), 120))
+	}
+	return nil
+}
+
+func (p *MerchantPublisher) Close() error { return nil }
 
 // Sign is the HMAC used both for outgoing callbacks and incoming API calls.
 func Sign(secret, timestamp string, body []byte) string {

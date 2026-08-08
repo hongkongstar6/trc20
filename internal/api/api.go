@@ -16,9 +16,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/hd"
+	"github.com/hongkongstar6/trc20/internal/merchant"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/outbox"
 	"github.com/hongkongstar6/trc20/internal/signer"
@@ -48,6 +50,8 @@ func (s *Server) Router() *gin.Engine {
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
 	v1 := r.Group("/v1", s.ipAllowlist(), s.authenticate())
+	v1.POST("/merchant", s.upsertMerchant)
+	v1.GET("/merchants", s.listMerchants)
 	v1.POST("/address", s.createAddress)
 	v1.POST("/withdraw", s.createWithdraw)
 	v1.GET("/withdraw/:biz_order_no", s.getWithdraw)
@@ -65,6 +69,13 @@ func (s *Server) requestLogger() gin.HandlerFunc {
 			"method", c.Request.Method, "path", c.FullPath(),
 			"status", c.Writer.Status(), "cost_ms", time.Since(start).Milliseconds())
 	}
+}
+
+func maxBodyBytes() int64 {
+	if config.Cfg.API.MaxBodyBytes <= 0 {
+		return 1 << 20
+	}
+	return config.Cfg.API.MaxBodyBytes
 }
 
 func (s *Server) ipAllowlist() gin.HandlerFunc {
@@ -89,10 +100,7 @@ func (s *Server) ipAllowlist() gin.HandlerFunc {
 func (s *Server) authenticate() gin.HandlerFunc {
 	skew := config.Duration(config.Cfg.API.SignatureSkew, 5*time.Minute)
 	nonceTTL := config.Duration(config.Cfg.API.NonceTTL, 10*time.Minute)
-	maxBody := config.Cfg.API.MaxBodyBytes
-	if maxBody <= 0 {
-		maxBody = 1 << 20
-	}
+	maxBody := maxBodyBytes()
 	return func(c *gin.Context) {
 		if config.Cfg.API.HMACSecret == "" {
 			c.Next()
@@ -130,26 +138,106 @@ func (s *Server) authenticate() gin.HandlerFunc {
 	}
 }
 
-// ------------------------------------------------------------------ addresses
+// ------------------------------------------------------------------ merchants
 
-type createAddressRequest struct {
-	UID string `json:"uid" binding:"required"`
+type merchantRequest struct {
+	MerchantID  string `json:"merchant_id" binding:"required"`
+	Name        string `json:"name" binding:"required"`
+	CallbackURL string `json:"callback_url" binding:"required"`
+	Secret      string `json:"secret" binding:"required"`
+	Status      *int8  `json:"status"`
 }
 
-// createAddress allocates one deposit address per uid. The derivation index
-// comes from the allocator, never from the uid itself.
-func (s *Server) createAddress(c *gin.Context) {
-	var req createAddressRequest
+// upsertMerchant registers a merchant or updates an existing one. The secret is
+// write only: it signs inbound parameters and outbound callbacks and is never
+// returned by the API.
+func (s *Server) upsertMerchant(c *gin.Context) {
+	var req merchantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	status := model.MerchantStatusOn
+	if req.Status != nil {
+		status = *req.Status
+	}
+	row := model.Merchant{
+		MerchantID:  req.MerchantID,
+		Name:        req.Name,
+		CallbackURL: req.CallbackURL,
+		Secret:      req.Secret,
+		Status:      status,
+	}
+	err := store.MyStore.DB.WithContext(c).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "merchant_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"name", "callback_url", "secret", "status", "updated_at",
+		}),
+	}).Create(&row).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"merchant_id": row.MerchantID, "status": status})
+}
+
+func (s *Server) listMerchants(c *gin.Context) {
+	var rows []model.Merchant
+	if err := store.MyStore.DB.WithContext(c).Order("id asc").
+		Limit(parseLimit(c, 200, 1000)).Find(&rows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"total": len(rows), "items": rows})
+}
+
+// ------------------------------------------------------------------ addresses
+
+// createAddress allocates one deposit address per (merchant_id, uid). The
+// parameters are signed with the merchant secret: sha256 over the parameters
+// sorted by key as "k1=v1&k2=v2" with the secret appended. The derivation index
+// comes from the allocator, never from the uid itself.
+func (s *Server) createAddress(c *gin.Context) {
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes()))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read body"})
+		return
+	}
+	params, err := merchant.DecodeParams(body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	merchantID := merchant.String(params, "merchant_id")
+	uid := merchant.String(params, "uid")
+	if merchantID == "" || uid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "merchant_id and uid are required"})
+		return
+	}
+	mch, err := merchant.GetEnabled(c, merchantID)
+	if errors.Is(err, merchant.ErrNotFound) || errors.Is(err, merchant.ErrDisabled) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := merchant.Verify(params, mch.Secret); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	account := merchant.Account(merchantID, uid)
 	var existing model.Wallet
-	err := store.MyStore.DB.WithContext(c).
-		Where("uid = ? AND chain = ? AND purpose = ?", req.UID, "TRON", "deposit").
+	err = store.MyStore.DB.WithContext(c).
+		Where("account = ? AND chain = ? AND purpose = ?", account, "TRON", "deposit").
 		Take(&existing).Error
 	if err == nil {
-		c.JSON(http.StatusOK, gin.H{"uid": req.UID, "address": existing.Address, "chain": existing.Chain})
+		c.JSON(http.StatusOK, gin.H{
+			"merchant_id": merchantID, "uid": uid, "account": account,
+			"address": existing.Address, "chain": existing.Chain,
+		})
 		return
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -169,7 +257,9 @@ func (s *Server) createAddress(c *gin.Context) {
 		return
 	}
 	wallet := model.Wallet{
-		UID:        req.UID,
+		MerchantID: merchantID,
+		UID:        uid,
+		Account:    &account,
 		Chain:      "TRON",
 		ChainIdx:   "TRON",
 		Address:    address,
@@ -179,10 +269,21 @@ func (s *Server) createAddress(c *gin.Context) {
 		Status:     1,
 	}
 	if err := store.MyStore.DB.WithContext(c).Create(&wallet).Error; err != nil {
+		// Concurrent allocation for the same account: return the winning row.
+		if e := store.MyStore.DB.WithContext(c).Where("account = ?", account).Take(&existing).Error; e == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"merchant_id": merchantID, "uid": uid, "account": account,
+				"address": existing.Address, "chain": existing.Chain,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"uid": req.UID, "address": address, "chain": "TRON"})
+	c.JSON(http.StatusOK, gin.H{
+		"merchant_id": merchantID, "uid": uid, "account": account,
+		"address": address, "chain": "TRON",
+	})
 }
 
 // ----------------------------------------------------------------- withdrawal
@@ -275,6 +376,9 @@ func (s *Server) listDeposits(c *gin.Context) {
 	q := store.MyStore.DB.WithContext(c).Model(&model.DepositRecord{}).
 		Where("status = ? AND internal = ? AND confirmed_at BETWEEN ? AND ?",
 			model.DepositStateConfirmed, false, from, to)
+	if merchantID := c.Query("merchant_id"); merchantID != "" {
+		q = q.Where("merchant_id = ?", merchantID)
+	}
 	if uid := c.Query("uid"); uid != "" {
 		q = q.Where("uid = ?", uid)
 	}

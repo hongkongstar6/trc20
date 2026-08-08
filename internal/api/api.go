@@ -17,7 +17,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
-	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/hd"
 	"github.com/hongkongstar6/trc20/internal/model"
@@ -29,15 +28,15 @@ import (
 
 type Server struct {
 	//cfg  *config.Config
-	st   *store.Store
+	//st   *store.Store
 	sign *signer.Client
 	//log  *logrus.Logger
 }
 
-func New(cfg *config.Config, st *store.Store, sign *signer.Client, log *logrus.Logger) *Server {
+func New(sign *signer.Client) *Server {
 	return &Server{
 		//cfg:  cfg,
-		st:   st,
+		//st:   st,
 		sign: sign,
 		//log: log
 	}
@@ -70,7 +69,7 @@ func (s *Server) requestLogger() gin.HandlerFunc {
 
 func (s *Server) ipAllowlist() gin.HandlerFunc {
 	allowed := map[string]bool{}
-	for _, ip := range bootstrap.Cfg.API.AllowedIPs {
+	for _, ip := range config.Cfg.API.AllowedIPs {
 		allowed[ip] = true
 	}
 	return func(c *gin.Context) {
@@ -88,14 +87,14 @@ func (s *Server) ipAllowlist() gin.HandlerFunc {
 
 // authenticate verifies HMAC(timestamp + body) and rejects replays.
 func (s *Server) authenticate() gin.HandlerFunc {
-	skew := config.Duration(bootstrap.Cfg.API.SignatureSkew, 5*time.Minute)
-	nonceTTL := config.Duration(bootstrap.Cfg.API.NonceTTL, 10*time.Minute)
-	maxBody := bootstrap.Cfg.API.MaxBodyBytes
+	skew := config.Duration(config.Cfg.API.SignatureSkew, 5*time.Minute)
+	nonceTTL := config.Duration(config.Cfg.API.NonceTTL, 10*time.Minute)
+	maxBody := config.Cfg.API.MaxBodyBytes
 	if maxBody <= 0 {
 		maxBody = 1 << 20
 	}
 	return func(c *gin.Context) {
-		if bootstrap.Cfg.API.HMACSecret == "" {
+		if config.Cfg.API.HMACSecret == "" {
 			c.Next()
 			return
 		}
@@ -114,14 +113,14 @@ func (s *Server) authenticate() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "stale timestamp"})
 			return
 		}
-		expected := outbox.Sign(bootstrap.Cfg.API.HMACSecret, ts, body)
+		expected := outbox.Sign(config.Cfg.API.HMACSecret, ts, body)
 		if !hmac.Equal([]byte(expected), []byte(sig)) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "bad signature"})
 			return
 		}
-		if nonce != "" && s.st.Redis != nil {
-			key := s.st.Key("nonce", hex.EncodeToString([]byte(nonce)))
-			ok, err := s.st.Redis.SetNX(c, key, "1", nonceTTL).Result()
+		if nonce != "" && store.MyStore.Redis != nil {
+			key := store.MyStore.Key("nonce", hex.EncodeToString([]byte(nonce)))
+			ok, err := store.MyStore.Redis.SetNX(c, key, "1", nonceTTL).Result()
 			if err == nil && !ok {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "replayed nonce"})
 				return
@@ -146,7 +145,7 @@ func (s *Server) createAddress(c *gin.Context) {
 		return
 	}
 	var existing model.Wallet
-	err := s.st.DB.WithContext(c).
+	err := store.MyStore.DB.WithContext(c).
 		Where("uid = ? AND chain = ? AND purpose = ?", req.UID, "TRON", "deposit").
 		Take(&existing).Error
 	if err == nil {
@@ -157,12 +156,12 @@ func (s *Server) createAddress(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	index, err := s.st.NextAddressIndex(c, "TRON")
+	index, err := store.MyStore.NextAddressIndex(c, "TRON")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	path := hd.AddressPath(bootstrap.Cfg.Wallet.AccountPath, index)
+	path := hd.AddressPath(config.Cfg.Wallet.AccountPath, index)
 
 	address, err := s.sign.DeriveAddress(c, path)
 	if err != nil {
@@ -179,7 +178,7 @@ func (s *Server) createAddress(c *gin.Context) {
 		Purpose:    "deposit",
 		Status:     1,
 	}
-	if err := s.st.DB.WithContext(c).Create(&wallet).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(c).Create(&wallet).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -213,9 +212,9 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		return
 	}
 	var token *config.TokenConfig
-	for i := range bootstrap.Cfg.Wallet.Tokens {
-		if bootstrap.Cfg.Wallet.Tokens[i].Enabled && bootstrap.Cfg.Wallet.Tokens[i].Symbol == req.Symbol {
-			token = &bootstrap.Cfg.Wallet.Tokens[i]
+	for i := range config.Cfg.Wallet.Tokens {
+		if config.Cfg.Wallet.Tokens[i].Enabled && config.Cfg.Wallet.Tokens[i].Symbol == req.Symbol {
+			token = &config.Cfg.Wallet.Tokens[i]
 			break
 		}
 	}
@@ -233,12 +232,12 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		AmountUnits: amount.String(),
 		Decimals:    token.Decimals,
 		Status:      model.WithdrawStateCreated,
-		FromAddress: bootstrap.Cfg.Wallet.HotWallet.Address,
+		FromAddress: config.Cfg.Wallet.HotWallet.Address,
 	}
-	if err := s.st.DB.WithContext(c).Create(&row).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(c).Create(&row).Error; err != nil {
 		// Duplicate submission: return the existing order instead of failing.
 		var existing model.WithdrawRecord
-		if e := s.st.DB.WithContext(c).Where("biz_order_no = ?", req.BizOrderNo).Take(&existing).Error; e == nil {
+		if e := store.MyStore.DB.WithContext(c).Where("biz_order_no = ?", req.BizOrderNo).Take(&existing).Error; e == nil {
 			c.JSON(http.StatusOK, gin.H{"biz_order_no": existing.BizOrderNo, "status": existing.Status, "txid": existing.TxID, "duplicated": true})
 			return
 		}
@@ -250,7 +249,7 @@ func (s *Server) createWithdraw(c *gin.Context) {
 
 func (s *Server) getWithdraw(c *gin.Context) {
 	var row model.WithdrawRecord
-	err := s.st.DB.WithContext(c).Where("biz_order_no = ?", c.Param("biz_order_no")).Take(&row).Error
+	err := store.MyStore.DB.WithContext(c).Where("biz_order_no = ?", c.Param("biz_order_no")).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
@@ -273,7 +272,7 @@ func (s *Server) listDeposits(c *gin.Context) {
 		return
 	}
 	limit := parseLimit(c, 200, 1000)
-	q := s.st.DB.WithContext(c).Model(&model.DepositRecord{}).
+	q := store.MyStore.DB.WithContext(c).Model(&model.DepositRecord{}).
 		Where("status = ? AND internal = ? AND confirmed_at BETWEEN ? AND ?",
 			model.DepositStateConfirmed, false, from, to)
 	if uid := c.Query("uid"); uid != "" {
@@ -295,7 +294,7 @@ func (s *Server) getDeposit(c *gin.Context) {
 		return
 	}
 	var row model.DepositRecord
-	err = s.st.DB.WithContext(c).Where("txid = ? AND event_index = ?", txid, index).Take(&row).Error
+	err = store.MyStore.DB.WithContext(c).Where("txid = ? AND event_index = ?", txid, index).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
@@ -310,7 +309,7 @@ func (s *Server) getDeposit(c *gin.Context) {
 // listEvents exposes the outbox itself, including dead lettered events, so
 // nothing can be silently lost between the two systems.
 func (s *Server) listEvents(c *gin.Context) {
-	q := s.st.DB.WithContext(c).Model(&model.NotifyOutbox{})
+	q := store.MyStore.DB.WithContext(c).Model(&model.NotifyOutbox{})
 	if status := c.Query("status"); status != "" {
 		q = q.Where("status = ?", status)
 	}

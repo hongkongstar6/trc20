@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/hongkongstar6/trc20/internal/config"
+	"github.com/sirupsen/logrus"
 )
 
 func TestNewWritesDailyFileInPlainFormat(t *testing.T) {
 	dir := t.TempDir()
-	log := NewLogrus(config.LogConfig{Level: "info", LogDir: dir}, "wallet-api")
-	log.Error("解析参数失败err:invalid character", "txid", "abc")
+	InitLogrus(config.LogConfig{Level: "info", LogDir: dir}, "wallet-api")
+	logrus.Error("解析参数失败err:invalid character", "txid", "abc")
 
 	want := filepath.Join(dir, binaryName()+"-"+time.Now().Format("2006-01-02")+".log")
 	b, err := os.ReadFile(want)
@@ -31,9 +32,9 @@ func TestNewWritesDailyFileInPlainFormat(t *testing.T) {
 
 func TestLevelFiltering(t *testing.T) {
 	dir := t.TempDir()
-	log := NewLogrus(config.LogConfig{Level: "warn", LogDir: dir}, "svc")
-	log.Info("dropped")
-	log.Warn("kept")
+	InitLogrus(config.LogConfig{Level: "warn", LogDir: dir}, "svc")
+	logrus.Info("dropped")
+	logrus.Warn("kept")
 
 	b, err := os.ReadFile(filepath.Join(dir, binaryName()+"-"+time.Now().Format("2006-01-02")+".log"))
 	if err != nil {
@@ -51,8 +52,8 @@ func TestLevelFiltering(t *testing.T) {
 func TestGroupedAttrsUseDottedKeys(t *testing.T) {
 	dir := t.TempDir()
 	//log := New(config.LogConfig{LogDir: dir}, "svc").WithGroup("chain").With("block", 42)
-	log := NewLogrus(config.LogConfig{LogDir: dir}, "svc")
-	log.Info("scanned")
+	InitLogrus(config.LogConfig{LogDir: dir}, "svc")
+	logrus.Info("scanned")
 
 	b, err := os.ReadFile(filepath.Join(dir, binaryName()+"-"+time.Now().Format("2006-01-02")+".log"))
 	if err != nil {
@@ -65,6 +66,6 @@ func TestGroupedAttrsUseDottedKeys(t *testing.T) {
 
 func TestNewStdoutOnlyWhenNoDir(t *testing.T) {
 	// No LogDir: must not create files anywhere; just exercise the path.
-	log := NewLogrus(config.LogConfig{Level: "debug"}, "svc")
-	log.Debug("noop")
+	InitLogrus(config.LogConfig{Level: "debug"}, "svc")
+	logrus.Debug("noop")
 }

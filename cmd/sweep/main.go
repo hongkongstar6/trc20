@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
+	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/energy"
+	"github.com/hongkongstar6/trc20/internal/store"
 	"github.com/hongkongstar6/trc20/internal/sweep"
 	"github.com/sirupsen/logrus"
 )
@@ -36,22 +38,22 @@ func main() {
 		logrus.Error("energy manager init failed", "err", err)
 		return
 	}
-	pricer := energy.NewPricer(bootstrap.Cfg.Sweep.Threshold, bootstrap.Cfg.Energy, mgr, app.Gateway, nil)
+	pricer := energy.NewPricer(config.Cfg.Sweep.Threshold, config.Cfg.Energy, mgr, app.Gateway, nil)
 	go func() {
 		if err := pricer.Run(ctx); err != nil {
 			logrus.Error("pricer stopped", "err", err)
 		}
 	}()
 
-	topup := energy.NewTopup(bootstrap.Cfg.Energy.AutoTopup, app.Store, app.Gateway, signClient, nil,
-		mgr.Providers(), bootstrap.Cfg.Wallet.GasAccount.Path)
+	topup := energy.NewTopup(config.Cfg.Energy.AutoTopup, store.MyStore, app.Gateway, signClient, nil,
+		mgr.Providers(), config.Cfg.Wallet.GasAccount.Path)
 	go func() {
 		if err := topup.Run(ctx); err != nil {
 			logrus.Error("topup loop stopped", "err", err)
 		}
 	}()
 
-	svc, err := sweep.New(app.Store, app.Gateway, signClient, mgr, pricer, nil)
+	svc, err := sweep.New(app.Gateway, signClient, mgr, pricer)
 	if err != nil {
 		logrus.Error("sweep init failed", "err", err)
 		return

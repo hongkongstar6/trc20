@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
+	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/signer"
 	"github.com/sirupsen/logrus"
 )
@@ -19,20 +20,20 @@ import (
 func main() {
 	pwd, _ := os.Getwd()
 	fmt.Println("sign 当前工作目录:", pwd)
-	app, err := bootstrap.Init("sign-service")
+	_, err := bootstrap.Init("sign-service")
 	if err != nil {
 		panic(err)
 	}
 	policy := signer.PolicyFromConfig()
-	svc, err := signer.New(bootstrap.Cfg.Sign, policy, signer.NewDBAudit(app.Store))
+	svc, err := signer.New(config.Cfg.Sign, policy, signer.NewDBAudit())
 	if err != nil {
 		logrus.Error("sign service init failed", "err", err)
 		return
 	}
-	r := signer.NewHTTPServer(svc, bootstrap.Cfg.Sign.Token)
-	logrus.Info("sign-service listening", "addr", bootstrap.Cfg.Sign.Listen, "mtls", bootstrap.Cfg.Sign.TLS.Enabled)
-	if !bootstrap.Cfg.Sign.TLS.Enabled {
-		if err := r.Run(bootstrap.Cfg.Sign.Listen); err != nil {
+	r := signer.NewHTTPServer(svc, config.Cfg.Sign.Token)
+	logrus.Info("sign-service listening", "addr", config.Cfg.Sign.Listen, "mtls", config.Cfg.Sign.TLS.Enabled)
+	if !config.Cfg.Sign.TLS.Enabled {
+		if err := r.Run(config.Cfg.Sign.Listen); err != nil {
 			logrus.Error("sign server stopped", "err", err)
 		}
 		return
@@ -40,12 +41,12 @@ func main() {
 
 	// mTLS needs a client CA pool, which gin's RunTLS cannot express, so the
 	// engine serves a TLS listener built here instead.
-	tlsCfg, err := serverTLS(bootstrap.Cfg.Sign.TLS.CAFile, bootstrap.Cfg.Sign.TLS.CertFile, bootstrap.Cfg.Sign.TLS.KeyFile)
+	tlsCfg, err := serverTLS(config.Cfg.Sign.TLS.CAFile, config.Cfg.Sign.TLS.CertFile, config.Cfg.Sign.TLS.KeyFile)
 	if err != nil {
 		logrus.Error("mTLS setup failed", "err", err)
 		return
 	}
-	ln, err := net.Listen("tcp", bootstrap.Cfg.Sign.Listen)
+	ln, err := net.Listen("tcp", config.Cfg.Sign.Listen)
 	if err != nil {
 		logrus.Error("sign listen failed", "err", err)
 		return

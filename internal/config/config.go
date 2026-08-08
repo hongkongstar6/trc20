@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var Cfg *Config
+
 // Config is the root configuration for every entrypoint of the monorepo.
 // Every service reads the same file and only uses the sections it needs.
 type Config struct {
@@ -277,15 +279,16 @@ func Load(path string) (*Config, error) {
 		}
 		return ""
 	})
-	var c Config
-	if err := yaml.Unmarshal([]byte(expanded), &c); err != nil {
+	//var c Config
+	if err := yaml.Unmarshal([]byte(expanded), &Cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	c.applyDefaults()
-	if err := c.validate(); err != nil {
+	Cfg.applyDefaults()
+	if err := Cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &c, nil
+
+	return Cfg, nil
 }
 
 // loadEnvFileFor resolves which .env to source for the given config path.

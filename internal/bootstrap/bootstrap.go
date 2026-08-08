@@ -27,11 +27,9 @@ import (
 type App struct {
 	//Cfg *config.Config
 	//Log     *logrus.Logger //*slog.Logger
-	Store   *store.Store
+	//Store   *store.Store
 	Gateway *chain.Gateway
 }
-
-var Cfg *config.Config
 
 // Init loads the config, opens the datastores and builds the chain gateway.
 func Init(service string) (*App, error) {
@@ -43,9 +41,9 @@ func Init(service string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	Cfg = cfg // Assign the loaded config to the global variable
-	log := logx.NewLogrus(cfg.Log, service)
-	st, err := store.Open(cfg) //数据库
+	// Assign the loaded config to the global variable
+	logx.InitLogrus(cfg.Log, service)
+	st, err := store.Open() //数据库
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +51,7 @@ func Init(service string) (*App, error) {
 		if err := st.AutoMigrate(); err != nil {
 			return nil, err
 		}
-		log.Info("schema migrated")
+		logrus.Info("schema migrated")
 		//os.Exit(0)
 	}
 	gw, err := chain.NewGateway(cfg.Chain)
@@ -63,17 +61,18 @@ func Init(service string) (*App, error) {
 	return &App{
 		//Cfg: cfg,
 		//Log:   log,
-		Store: st, Gateway: gw}, nil
+		//Store: st,
+		Gateway: gw}, nil
 }
 
 // SignerClient builds the sign-service client.
 func (a *App) SignerClient() (*signer.Client, error) {
-	return signer.NewClient(Cfg.Sign)
+	return signer.NewClient(config.Cfg.Sign)
 }
 
 // EnergyManager builds the provider registry and the manager on top of it.
 func (a *App) EnergyManager() (*energy.Manager, error) {
-	provs, err := energy.Build(Cfg.Energy)
+	provs, err := energy.Build(config.Cfg.Energy)
 	if err != nil {
 		return nil, err
 	}
@@ -81,10 +80,8 @@ func (a *App) EnergyManager() (*energy.Manager, error) {
 	for n := range provs {
 		names = append(names, n)
 	}
-	logrus.Info("energy providers loaded", "providers", names, "mode", Cfg.Energy.Mode)
-	return energy.NewManager(Cfg.Energy, a.Store, a.Gateway,
-		nil, // a.Log,
-		provs), nil
+	logrus.Info("energy providers loaded", "providers", names, "mode", config.Cfg.Energy.Mode)
+	return energy.NewManager(config.Cfg.Energy, a.Gateway, provs), nil
 }
 
 // Context returns a context cancelled on SIGINT/SIGTERM.

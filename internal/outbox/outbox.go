@@ -31,13 +31,13 @@ type Publisher interface {
 
 type Dispatcher struct {
 	cfg config.NotifyConfig
-	st  *store.Store
+	//st  *store.Store
 	//log        *logrus.Logger
 	publishers []Publisher
 }
 
-func NewDispatcher(cfg config.NotifyConfig, st *store.Store, log *logrus.Logger, publishers ...Publisher) *Dispatcher {
-	return &Dispatcher{cfg: cfg, st: st, publishers: publishers}
+func NewDispatcher(cfg config.NotifyConfig, publishers ...Publisher) *Dispatcher {
+	return &Dispatcher{cfg: cfg, publishers: publishers}
 }
 
 func (d *Dispatcher) Run(ctx context.Context) error {
@@ -62,7 +62,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 
 func (d *Dispatcher) drainOnce(ctx context.Context) (int, error) {
 	var rows []model.NotifyOutbox
-	err := d.st.DB.WithContext(ctx).
+	err := store.MyStore.DB.WithContext(ctx).
 		Where("status = ? AND next_retry <= ?", model.OutboxStatePending, time.Now()).
 		Order("id asc").Limit(d.cfg.BatchSize).Find(&rows).Error
 	if err != nil {
@@ -84,7 +84,7 @@ func (d *Dispatcher) deliver(ctx context.Context, row *model.NotifyOutbox) {
 	}
 	now := time.Now()
 	if lastErr == nil {
-		d.st.DB.WithContext(ctx).Model(&model.NotifyOutbox{}).Where("id = ?", row.ID).
+		store.MyStore.DB.WithContext(ctx).Model(&model.NotifyOutbox{}).Where("id = ?", row.ID).
 			UpdateColumns(map[string]any{
 				"status": model.OutboxStateSent, "sent_at": now, "updated_at": now, "last_error": "",
 			})
@@ -98,7 +98,7 @@ func (d *Dispatcher) deliver(ctx context.Context, row *model.NotifyOutbox) {
 		status = model.OutboxStateDead
 		logrus.Error("outbox event dead lettered", "event_id", row.EventID, "err", lastErr)
 	}
-	d.st.DB.WithContext(ctx).Model(&model.NotifyOutbox{}).Where("id = ?", row.ID).
+	store.MyStore.DB.WithContext(ctx).Model(&model.NotifyOutbox{}).Where("id = ?", row.ID).
 		UpdateColumns(map[string]any{
 			"status":      status,
 			"retry_count": retry,

@@ -9,6 +9,7 @@ import (
 
 	"github.com/hongkongstar6/trc20/internal/api"
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
+	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/outbox"
 	"github.com/sirupsen/logrus"
 )
@@ -30,11 +31,11 @@ func main() {
 	}
 	logrus.Infoln("abcd")
 	var publishers []outbox.Publisher
-	if bootstrap.Cfg.Notify.HTTP.Enabled {
-		publishers = append(publishers, outbox.NewHTTPPublisher(bootstrap.Cfg.Notify))
+	if config.Cfg.Notify.HTTP.Enabled {
+		publishers = append(publishers, outbox.NewHTTPPublisher(config.Cfg.Notify))
 	}
-	if bootstrap.Cfg.Notify.RocketMQ.Enabled {
-		mq, err := outbox.NewRocketMQPublisher(bootstrap.Cfg.Notify)
+	if config.Cfg.Notify.RocketMQ.Enabled {
+		mq, err := outbox.NewRocketMQPublisher(config.Cfg.Notify)
 		if err != nil {
 			logrus.Error("rocketmq publisher init failed", "err", err)
 			return
@@ -43,7 +44,7 @@ func main() {
 		publishers = append(publishers, mq)
 	}
 	if len(publishers) > 0 {
-		dispatcher := outbox.NewDispatcher(bootstrap.Cfg.Notify, app.Store, nil, publishers...)
+		dispatcher := outbox.NewDispatcher(config.Cfg.Notify, publishers...)
 		go func() {
 			if err := dispatcher.Run(ctx); err != nil {
 				logrus.Error("outbox dispatcher stopped", "err", err)
@@ -53,9 +54,9 @@ func main() {
 		logrus.Warn("no notify publisher enabled, events will queue in notify_outbox")
 	}
 
-	r := api.New(bootstrap.Cfg, app.Store, signClient, nil).Router()
-	logrus.Info("wallet-api listening", "addr", bootstrap.Cfg.API.Listen)
-	if err := r.Run(bootstrap.Cfg.API.Listen); err != nil {
+	r := api.New(signClient).Router()
+	logrus.Info("wallet-api listening", "addr", config.Cfg.API.Listen)
+	if err := r.Run(config.Cfg.API.Listen); err != nil {
 		logrus.Error("http server stopped", "err", err)
 	}
 }

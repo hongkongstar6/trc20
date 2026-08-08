@@ -30,8 +30,8 @@ import (
 //   - only one refill runs at a time, and a previous unsettled refill blocks the
 //     next one, because provider crediting lags the on-chain confirmation.
 type Topup struct {
-	cfg    config.AutoTopupConfig
-	st     *store.Store
+	cfg config.AutoTopupConfig
+	//st     *store.Store
 	gw     *chain.Gateway
 	signer *signer.Client
 	//log     *logrus.Logger
@@ -40,7 +40,7 @@ type Topup struct {
 }
 
 func NewTopup(cfg config.AutoTopupConfig, st *store.Store, gw *chain.Gateway, sign *signer.Client, log *logrus.Logger, provs map[string]Provider, gasPath string) *Topup {
-	return &Topup{cfg: cfg, st: st, gw: gw, signer: sign, provs: provs, gasPath: gasPath}
+	return &Topup{cfg: cfg, gw: gw, signer: sign, provs: provs, gasPath: gasPath}
 }
 
 func (t *Topup) Run(ctx context.Context) error {
@@ -108,7 +108,7 @@ func (t *Topup) checkGasAccount(ctx context.Context) {
 }
 
 func (t *Topup) refill(ctx context.Context, provider string, conf config.ProviderTopupConf, balance float64, reportedDeposit string) error {
-	unlock, ok := t.st.Lock(ctx, "topup:"+provider, 10*time.Minute)
+	unlock, ok := store.MyStore.Lock(ctx, "topup:"+provider, 10*time.Minute)
 	if !ok {
 		return nil
 	}
@@ -145,7 +145,7 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 		Status:            model.TopupStateCreated,
 		Operator:          "auto",
 	}
-	if err := t.st.DB.WithContext(ctx).Create(row).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(ctx).Create(row).Error; err != nil {
 		return err
 	}
 
@@ -169,13 +169,13 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 	if err != nil {
 		// The transaction may still be on chain; leave the row broadcast and
 		// let reconciliation settle it rather than sending a second transfer.
-		t.st.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
+		store.MyStore.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
 			"txid": signed.TxID, "status": model.TopupStateBroadcast,
 			"fail_reason": truncate(err.Error(), 240), "updated_at": time.Now(),
 		})
 		return err
 	}
-	t.st.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
+	store.MyStore.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
 		"txid": res.TxID, "status": model.TopupStateBroadcast, "updated_at": time.Now(),
 	})
 	logrus.Warn("provider prepaid balance topped up automatically",
@@ -187,7 +187,7 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 // credited: provider crediting lags, so an eager retry double pays.
 func (t *Topup) guardPending(ctx context.Context, provider string) error {
 	var pending model.TopupRecord
-	err := t.st.DB.WithContext(ctx).
+	err := store.MyStore.DB.WithContext(ctx).
 		Where("provider = ? AND status IN ?", provider,
 			[]string{model.TopupStateCreated, model.TopupStateBroadcast, model.TopupStateConfirmed}).
 		Order("id desc").Take(&pending).Error
@@ -206,7 +206,7 @@ func (t *Topup) guardDailyLimits(ctx context.Context, provider string, conf conf
 		Total float64
 		Count int64
 	}
-	err := t.st.DB.WithContext(ctx).Model(&model.TopupRecord{}).
+	err := store.MyStore.DB.WithContext(ctx).Model(&model.TopupRecord{}).
 		Select("COALESCE(SUM(amount_trx),0) as total, COUNT(*) as count").
 		Where("provider = ? AND created_at >= ? AND status <> ?", provider, since, model.TopupStateFailed).
 		Scan(&agg).Error
@@ -224,7 +224,7 @@ func (t *Topup) guardDailyLimits(ctx context.Context, provider string, conf conf
 }
 
 func (t *Topup) fail(ctx context.Context, row *model.TopupRecord, cause error) {
-	t.st.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
+	store.MyStore.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
 		"status": model.TopupStateFailed, "fail_reason": truncate(cause.Error(), 240), "updated_at": time.Now(),
 	})
 }
@@ -233,7 +233,7 @@ func (t *Topup) fail(ctx context.Context, row *model.TopupRecord, cause error) {
 // for the provider balance to actually reflect the transfer.
 func (t *Topup) Reconcile(ctx context.Context) error {
 	var rows []model.TopupRecord
-	err := t.st.DB.WithContext(ctx).
+	err := store.MyStore.DB.WithContext(ctx).
 		Where("status IN ?", []string{model.TopupStateBroadcast, model.TopupStateConfirmed}).
 		Order("id asc").Limit(50).Find(&rows).Error
 	if err != nil {
@@ -253,12 +253,12 @@ func (t *Topup) Reconcile(ctx context.Context) error {
 			continue
 		}
 		if !info.Succeeded() {
-			t.st.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
+			store.MyStore.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
 				UpdateColumns(map[string]any{"status": model.TopupStateFailed, "fail_reason": "on-chain failure", "updated_at": now})
 			continue
 		}
 		if row.Status == model.TopupStateBroadcast {
-			t.st.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
+			store.MyStore.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
 				UpdateColumns(map[string]any{"status": model.TopupStateConfirmed, "confirmed_at": now, "updated_at": now})
 		}
 		prov, ok := t.provs[row.Provider]
@@ -270,7 +270,7 @@ func (t *Topup) Reconcile(ctx context.Context) error {
 			continue
 		}
 		if balance >= row.TriggerBalanceTRX+row.AmountTRX*0.9 {
-			t.st.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
+			store.MyStore.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
 				UpdateColumns(map[string]any{"status": model.TopupStateCredited, "updated_at": now})
 		}
 	}

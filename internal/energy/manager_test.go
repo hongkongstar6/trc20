@@ -47,7 +47,7 @@ func testLogger() *logrus.Logger {
 
 func newTestManager(mode string, provs map[string]Provider) *Manager {
 	cfg := config.EnergyConfig{Mode: mode, DefaultPeriod: "1h", QuoteCacheTTL: "1ms"}
-	return NewManager(cfg, nil, nil, testLogger(), provs)
+	return NewManager(cfg, nil, provs)
 }
 
 func TestBestQuotePicksCheapest(t *testing.T) {
@@ -109,7 +109,7 @@ func TestPriorityModeKeepsBurnLast(t *testing.T) {
 
 func TestFixedModeUsesConfiguredProvider(t *testing.T) {
 	cfg := config.EnergyConfig{Mode: "fixed", Fixed: "trx_burn", DefaultPeriod: "1h"}
-	mgr := NewManager(cfg, nil, nil, testLogger(), map[string]Provider{
+	mgr := NewManager(cfg, nil, map[string]Provider{
 		"trx_burn":       &fakeProvider{name: "trx_burn", cost: 3.2, billed: 32000},
 		"tronenergyrent": &fakeProvider{name: "tronenergyrent", cost: 1.0, billed: 32000},
 	})
@@ -124,7 +124,7 @@ func TestFixedModeUsesConfiguredProvider(t *testing.T) {
 
 func TestFixedModeFailsWhenProviderMissing(t *testing.T) {
 	cfg := config.EnergyConfig{Mode: "fixed", Fixed: "gasstation"}
-	mgr := NewManager(cfg, nil, nil, testLogger(), map[string]Provider{
+	mgr := NewManager(cfg, nil, map[string]Provider{
 		"trx_burn": &fakeProvider{name: "trx_burn"},
 	})
 	if _, err := mgr.BestQuote(context.Background(), QuoteRequest{Amount: 1}); err == nil {
@@ -135,7 +135,7 @@ func TestFixedModeFailsWhenProviderMissing(t *testing.T) {
 func TestQuoteCacheAvoidsRepeatedCalls(t *testing.T) {
 	p := &fakeProvider{name: "trx_burn", cost: 3.2, billed: 32000}
 	cfg := config.EnergyConfig{Mode: "cheapest", DefaultPeriod: "1h", QuoteCacheTTL: "1m"}
-	mgr := NewManager(cfg, nil, nil, testLogger(), map[string]Provider{"trx_burn": p})
+	mgr := NewManager(cfg, nil, map[string]Provider{"trx_burn": p})
 	for i := 0; i < 3; i++ {
 		if _, err := mgr.BestQuote(context.Background(), QuoteRequest{Resource: ResourceEnergy, Amount: 32000}); err != nil {
 			t.Fatal(err)

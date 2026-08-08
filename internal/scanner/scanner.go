@@ -17,7 +17,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
@@ -35,32 +34,34 @@ type token struct {
 
 type Scanner struct {
 	//cfg *config.Config
-	st *store.Store
+	//st *store.Store
 	gw *chain.Gateway
 	//log     *logrus.Logger
 	tokens  map[string]token // contract (base58) -> token
 	minUnit *big.Int
 }
 
-func New(st *store.Store, gw *chain.Gateway) *Scanner {
+func New(gw *chain.Gateway) *Scanner {
 	tokens := map[string]token{}
-	for _, t := range bootstrap.Cfg.Wallet.Tokens {
+	for _, t := range config.Cfg.Wallet.Tokens {
 		if t.Enabled {
 			tokens[t.Contract] = token{symbol: t.Symbol, decimals: t.Decimals}
 		}
 	}
 	minUnit := new(big.Int)
-	if _, ok := minUnit.SetString(bootstrap.Cfg.Deposit.MinDepositUnits, 10); !ok {
+	if _, ok := minUnit.SetString(config.Cfg.Deposit.MinDepositUnits, 10); !ok {
 		minUnit = big.NewInt(0)
 	}
-	return &Scanner{st: st, gw: gw,
+	return &Scanner{
+		//st: st,
+		gw: gw,
 		//log:    log,
 		tokens: tokens, minUnit: minUnit}
 }
 
 // Run scans forward continuously until ctx is cancelled.
 func (s *Scanner) Run(ctx context.Context) error {
-	interval := config.Duration(bootstrap.Cfg.Deposit.PollInterval, 3*time.Second)
+	interval := config.Duration(config.Cfg.Deposit.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -93,7 +94,7 @@ func (s *Scanner) tick(ctx context.Context) error {
 	}
 
 	from := cursor.BlockNumber + 1
-	to := min64(from+bootstrap.Cfg.Deposit.BatchBlocks-1, head.Number())
+	to := min64(from+config.Cfg.Deposit.BatchBlocks-1, head.Number())
 	if from > to {
 		return nil
 	}
@@ -126,14 +127,14 @@ func (s *Scanner) tick(ctx context.Context) error {
 
 func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCursor, error) {
 	var c model.ChainCursor
-	err := s.st.DB.WithContext(ctx).Where("name = ?", cursorName).Take(&c).Error
+	err := store.MyStore.DB.WithContext(ctx).Where("name = ?", cursorName).Take(&c).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		start := bootstrap.Cfg.Deposit.StartBlock
+		start := config.Cfg.Deposit.StartBlock
 		if start <= 0 {
 			start = head - 1
 		}
 		c = model.ChainCursor{Name: cursorName, BlockNumber: start}
-		if err := s.st.DB.WithContext(ctx).Create(&c).Error; err != nil {
+		if err := store.MyStore.DB.WithContext(ctx).Create(&c).Error; err != nil {
 			return nil, err
 		}
 		return &c, nil
@@ -142,7 +143,7 @@ func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCurso
 }
 
 func (s *Scanner) saveCursor(ctx context.Context, c *model.ChainCursor) error {
-	return s.st.DB.WithContext(ctx).Model(&model.ChainCursor{}).
+	return store.MyStore.DB.WithContext(ctx).Model(&model.ChainCursor{}).
 		Where("name = ?", cursorName).
 		UpdateColumns(map[string]any{
 			"block_number": c.BlockNumber,
@@ -174,7 +175,7 @@ func (s *Scanner) scanBlock(ctx context.Context, block *chain.Block) error {
 			}
 		}
 	}
-	return s.st.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		snapshot := model.BlockSnapshot{
 			BlockNumber: block.Number(),
 			BlockHash:   block.BlockID,
@@ -244,7 +245,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 		return nil, false, nil
 	}
 	var wallet model.Wallet
-	err := s.st.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
+	err := store.MyStore.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, nil
 	}
@@ -278,7 +279,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 
 func (s *Scanner) isInternal(ctx context.Context, from string) (bool, error) {
 	var count int64
-	if err := s.st.DB.WithContext(ctx).Model(&model.Wallet{}).Where("address = ?", from).Count(&count).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(ctx).Model(&model.Wallet{}).Where("address = ?", from).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
@@ -287,12 +288,12 @@ func (s *Scanner) isInternal(ctx context.Context, from string) (bool, error) {
 // confirmUpTo promotes pending records that reached the confirmation depth and
 // enqueues exactly one outbox event per record.
 func (s *Scanner) confirmUpTo(ctx context.Context, head int64) error {
-	limit := head - bootstrap.Cfg.Deposit.Confirmations
+	limit := head - config.Cfg.Deposit.Confirmations
 	if limit <= 0 {
 		return nil
 	}
 	var pending []model.DepositRecord
-	err := s.st.DB.WithContext(ctx).
+	err := store.MyStore.DB.WithContext(ctx).
 		Where("status = ? AND block_number <= ?", model.DepositStatePending, limit).
 		Order("id asc").Limit(500).Find(&pending).Error
 	if err != nil {
@@ -316,7 +317,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 	}
 	now := time.Now()
 	if info == nil || !info.Succeeded() {
-		return s.st.DB.WithContext(ctx).Model(&model.DepositRecord{}).
+		return store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
 			Where("id = ? AND status = ?", rec.ID, model.DepositStatePending).
 			UpdateColumns(map[string]any{"status": model.DepositStateOrphaned, "updated_at": now}).Error
 	}
@@ -324,7 +325,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 		logrus.Warn("deposit moved to another block", "txid", rec.TxID, "old", rec.BlockNumber, "new", info.BlockNumber)
 		rec.BlockNumber = info.BlockNumber
 	}
-	return s.st.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&model.DepositRecord{}).
 			Where("id = ? AND status = ?", rec.ID, model.DepositStatePending).
 			UpdateColumns(map[string]any{
@@ -371,10 +372,10 @@ func depositEventID(rec model.DepositRecord) string {
 // chain, orphans the unconfirmed records above it and rewinds the cursor.
 func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.ChainCursor, error) {
 	forkPoint := detectedAt - 1
-	limit := detectedAt - bootstrap.Cfg.Deposit.ReorgDepth
+	limit := detectedAt - config.Cfg.Deposit.ReorgDepth
 	for ; forkPoint > 0 && forkPoint >= limit; forkPoint-- {
 		var snap model.BlockSnapshot
-		err := s.st.DB.WithContext(ctx).Where("block_number = ?", forkPoint).Take(&snap).Error
+		err := store.MyStore.DB.WithContext(ctx).Where("block_number = ?", forkPoint).Take(&snap).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			continue
 		}
@@ -390,10 +391,10 @@ func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.Cha
 		}
 	}
 	if forkPoint <= 0 || forkPoint < limit {
-		return nil, fmt.Errorf("reorg deeper than reorg_depth=%d, manual intervention required", bootstrap.Cfg.Deposit.ReorgDepth)
+		return nil, fmt.Errorf("reorg deeper than reorg_depth=%d, manual intervention required", config.Cfg.Deposit.ReorgDepth)
 	}
 	cursor := &model.ChainCursor{Name: cursorName, BlockNumber: forkPoint}
-	err := s.st.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.DepositRecord{}).
 			Where("block_number > ? AND status = ?", forkPoint, model.DepositStatePending).
 			UpdateColumns(map[string]any{"status": model.DepositStateOrphaned, "updated_at": time.Now()}).Error; err != nil {
@@ -417,11 +418,11 @@ func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.Cha
 }
 
 func (s *Scanner) pruneSnapshots(ctx context.Context, head int64) error {
-	keepFrom := head - bootstrap.Cfg.Deposit.ReorgDepth*10
+	keepFrom := head - config.Cfg.Deposit.ReorgDepth*10
 	if keepFrom <= 0 {
 		return nil
 	}
-	return s.st.DB.WithContext(ctx).Where("block_number < ?", keepFrom).Delete(&model.BlockSnapshot{}).Error
+	return store.MyStore.DB.WithContext(ctx).Where("block_number < ?", keepFrom).Delete(&model.BlockSnapshot{}).Error
 }
 
 func min64(a, b int64) int64 {

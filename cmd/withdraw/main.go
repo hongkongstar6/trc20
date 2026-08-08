@@ -6,7 +6,9 @@ import (
 	"os"
 
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
+	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/energy"
+	"github.com/hongkongstar6/trc20/internal/store"
 	"github.com/hongkongstar6/trc20/internal/withdraw"
 	"github.com/sirupsen/logrus"
 )
@@ -31,14 +33,14 @@ func main() {
 		logrus.Error("energy manager init failed", "err", err)
 		return
 	}
-	pool := energy.NewPool(bootstrap.Cfg.Energy, mgr, app.Gateway, nil, bootstrap.Cfg.Wallet.HotWallet.Address)
+	pool := energy.NewPool(config.Cfg.Energy, mgr, app.Gateway, nil, config.Cfg.Wallet.HotWallet.Address)
 	go func() {
 		if err := pool.Run(ctx); err != nil {
 			logrus.Error("energy pool stopped", "err", err)
 		}
 	}()
 
-	worker, err := withdraw.New(app.Store, app.Gateway, signClient, mgr, pool, nil)
+	worker, err := withdraw.New(store.MyStore, app.Gateway, signClient, mgr, pool, nil)
 	if err != nil {
 		logrus.Error("withdraw worker init failed", "err", err)
 		return

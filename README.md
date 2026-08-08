@@ -1,15 +1,5 @@
 # trc20
 
-cmd/api/main.go — 业务侧钱包 HTTP API 服务（wallet-api），同时兼任 notify outbox 的分发器，小型部署只需这一个常驻进程配合 worker。它初始化 signer 客户端、按配置启用 HTTP/RocketMQ 发布器运行 outbox.Dispatcher，并启动 http.Server。 main.go:1-3 main.go:44-59
-
-cmd/scanner/main.go — 充值扫描服务（deposit-scanner）：区块扫描、确认数处理与 reorg 处理，运行 scanner.New(...).Run(ctx)。 main.go:1-2 main.go:18-21
-
-cmd/sign/main.go — 签名服务（sign-service）：唯一持有密钥材料的进程，需部署在独立网络段仅供 worker 访问，生产环境应从 KMS/HSM/Vault 读取助记词。支持 mTLS（要求客户端证书）。 main.go:1-3 main.go:65-67
-
-cmd/sweep/main.go — 归集服务（sweep-service）：运行归集阈值定价器（energy.Pricer）与租赁商预付余额自动充值循环（energy.Topup），并周期性 Reconcile。 main.go:1-2 main.go:31-46
-
-cmd/withdraw/main.go — 提现 worker（withdraw-worker）：加上热钱包能量池（energy.Pool），运行 withdraw.New(...).Run(ctx)。 main.go:1 main.go:28-35
-
 托管型 USDT-TRC20 钱包网关：地址生成、存款扫描和
 
 确认、事件传递、提现签名和广播、资金清零至
@@ -47,6 +37,16 @@ cmd/withdraw/main.go — 提现 worker（withdraw-worker）：加上热钱包能
 
 （自托管的 FullNode 和/或 TronGrid），具有查询故障转移功能，以及一条广播路径
 该路径将*相同的签名字节*发送到备用节点，而不是重建
+cmd/api/main.go — 业务侧钱包 HTTP API 服务（wallet-api），同时兼任 notify outbox 的分发器，小型部署只需这一个常驻进程配合 worker。它初始化 signer 客户端、按配置启用 HTTP/RocketMQ 发布器运行 outbox.Dispatcher，并启动 http.Server。 main.go:1-3 main.go:44-59
+
+cmd/scanner/main.go — 充值扫描服务（deposit-scanner）：区块扫描、确认数处理与 reorg 处理，运行 scanner.New(...).Run(ctx)。 main.go:1-2 main.go:18-21
+
+cmd/sign/main.go — 签名服务（sign-service）：唯一持有密钥材料的进程，需部署在独立网络段仅供 worker 访问，生产环境应从 KMS/HSM/Vault 读取助记词。支持 mTLS（要求客户端证书）。 main.go:1-3 main.go:65-67
+
+cmd/sweep/main.go — 归集服务（sweep-service）：运行归集阈值定价器（energy.Pricer）与租赁商预付余额自动充值循环（energy.Topup），并周期性 Reconcile。 main.go:1-2 main.go:31-46
+
+cmd/withdraw/main.go — 提现 worker（withdraw-worker）：加上热钱包能量池（energy.Pool），运行 withdraw.New(...).Run(ctx)。 main.go:1 main.go:28-35
+
 
 交易。
 

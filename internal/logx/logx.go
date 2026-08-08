@@ -3,7 +3,6 @@
 package logx
 
 import (
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ import (
 //		l.SetLevel(logrusLevel(level(cfg.Level)))
 //		return l
 //	}
-func NewLogrus(cfg config.LogConfig, name string) *logrus.Logger {
+func InitLogrus(cfg config.LogConfig, name string) {
 	dir := strings.TrimSpace(cfg.LogDir)
 	dw := newDailyWriter(dir, name)
 
@@ -46,15 +45,16 @@ func NewLogrus(cfg config.LogConfig, name string) *logrus.Logger {
 	logrus.SetReportCaller(true) //显示行号和函数名
 	logrus.SetFormatter(&formatter{})
 	logrus.SetLevel(logrusLevel(level(cfg.Level)))
-	return logrus.StandardLogger()
+	//return logrus.StandardLogger()
+	//return nil
 }
 
-func writer(cfg config.LogConfig, name string) io.Writer {
-	if dir := strings.TrimSpace(cfg.LogDir); dir != "" {
-		return fileWriter(dir, name)
-	}
-	return os.Stdout
-}
+// func writer(cfg config.LogConfig, name string) io.Writer {
+// 	if dir := strings.TrimSpace(cfg.LogDir); dir != "" {
+// 		return fileWriter(dir, name)
+// 	}
+// 	return os.Stdout
+// }
 
 func level(name string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(name)) {

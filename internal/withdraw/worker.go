@@ -13,7 +13,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/energy"
@@ -26,7 +25,7 @@ import (
 
 type Worker struct {
 	//cfg  *config.Config
-	st   *store.Store
+	//st   *store.Store
 	gw   *chain.Gateway
 	sign *signer.Client
 	mgr  *energy.Manager
@@ -37,7 +36,7 @@ type Worker struct {
 
 func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pool *energy.Pool, log *logrus.Logger) (*Worker, error) {
 	var token config.TokenConfig
-	for _, t := range bootstrap.Cfg.Wallet.Tokens {
+	for _, t := range config.Cfg.Wallet.Tokens {
 		if t.Enabled {
 			token = t
 			break
@@ -46,20 +45,20 @@ func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Ma
 	if token.Contract == "" {
 		return nil, errors.New("withdraw: no enabled token configured")
 	}
-	if bootstrap.Cfg.Wallet.HotWallet.Address == "" || bootstrap.Cfg.Wallet.HotWallet.Path == "" {
+	if config.Cfg.Wallet.HotWallet.Address == "" || config.Cfg.Wallet.HotWallet.Path == "" {
 		return nil, errors.New("withdraw: wallet.hot_wallet address and path are required")
 	}
-	return &Worker{st: st, gw: gw, sign: sign, mgr: mgr, pool: pool, //log: log,
+	return &Worker{gw: gw, sign: sign, mgr: mgr, pool: pool, //log: log,
 		token: token}, nil
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	if !bootstrap.Cfg.Withdraw.Enabled {
+	if !config.Cfg.Withdraw.Enabled {
 		logrus.Info("withdraw disabled")
 		<-ctx.Done()
 		return nil
 	}
-	interval := config.Duration(bootstrap.Cfg.Withdraw.PollInterval, 3*time.Second)
+	interval := config.Duration(config.Cfg.Withdraw.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -79,7 +78,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 func (w *Worker) processCreated(ctx context.Context) error {
 	var rows []model.WithdrawRecord
-	err := w.st.DB.WithContext(ctx).
+	err := store.MyStore.DB.WithContext(ctx).
 		Where("status = ?", model.WithdrawStateCreated).
 		Order("id asc").Limit(20).Find(&rows).Error
 	if err != nil {
@@ -98,7 +97,7 @@ func (w *Worker) processCreated(ctx context.Context) error {
 // created -> signed -> broadcast with a compare-and-swap on every hop, so a
 // duplicated worker cannot broadcast twice.
 func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
-	unlock, ok := w.st.Lock(ctx, "withdraw:"+row.BizOrderNo, 5*time.Minute)
+	unlock, ok := store.MyStore.Lock(ctx, "withdraw:"+row.BizOrderNo, 5*time.Minute)
 	if !ok {
 		return nil
 	}
@@ -111,7 +110,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	if !ok || amount.Sign() <= 0 {
 		return w.reject(ctx, row, "invalid amount")
 	}
-	hot := bootstrap.Cfg.Wallet.HotWallet
+	hot := config.Cfg.Wallet.HotWallet
 	data, err := tron.EncodeTRC20Transfer(row.ToAddress, amount)
 	if err != nil {
 		return w.reject(ctx, row, "invalid destination")
@@ -123,7 +122,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	need, err := w.mgr.EstimateEnergy(ctx, hot.Address, w.token.Contract, data)
 	if err != nil {
 		logrus.Warn("withdraw energy estimate failed, using worst case", "err", err)
-		need = bootstrap.Cfg.Energy.EnergyPerTxNew
+		need = config.Cfg.Energy.EnergyPerTxNew
 	}
 	if w.pool != nil && !w.pool.HasEnergyFor(ctx, need) {
 		requestID := fmt.Sprintf("withdraw-%d", row.ID)
@@ -133,7 +132,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		}
 	}
 
-	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, w.token.Contract, data, bootstrap.Cfg.Withdraw.FeeLimitSun)
+	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, w.token.Contract, data, config.Cfg.Withdraw.FeeLimitSun)
 	if err != nil {
 		return err
 	}
@@ -152,7 +151,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		return err
 	}
 	expiry := time.Now().Add(time.Duration(w.expirationSeconds()) * time.Second)
-	res := w.st.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
+	res := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
 		UpdateColumns(map[string]any{
 			"status":       model.WithdrawStateSigned,
@@ -178,7 +177,7 @@ func (w *Worker) broadcast(ctx context.Context, id int64, txid string, tx *tron.
 		// A broadcast error is not a failed withdrawal: the transaction may
 		// already be propagating. Move to broadcast and let reconciliation
 		// decide based on the txid.
-		w.st.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
+		store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 			Where("id = ? AND status = ?", id, model.WithdrawStateSigned).
 			UpdateColumns(map[string]any{
 				"status": model.WithdrawStateBroadcast, "broadcast_at": now,
@@ -186,7 +185,7 @@ func (w *Worker) broadcast(ctx context.Context, id int64, txid string, tx *tron.
 			})
 		return err
 	}
-	w.st.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
+	store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", id, model.WithdrawStateSigned).
 		UpdateColumns(map[string]any{
 			"status": model.WithdrawStateBroadcast, "txid": result.TxID,
@@ -205,7 +204,7 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 	if !tron.IsValidAddress(row.ToAddress) {
 		return "invalid destination address"
 	}
-	for _, banned := range bootstrap.Cfg.Withdraw.AddressBlacklist {
+	for _, banned := range config.Cfg.Withdraw.AddressBlacklist {
 		if banned == row.ToAddress {
 			return "destination address is blacklisted"
 		}
@@ -213,7 +212,7 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 	// Withdrawing to one of our own deposit addresses would be an internal
 	// transfer with no user-visible effect; it must be handled off chain.
 	var internal int64
-	if err := w.st.DB.WithContext(ctx).Model(&model.Wallet{}).
+	if err := store.MyStore.DB.WithContext(ctx).Model(&model.Wallet{}).
 		Where("address = ?", row.ToAddress).Count(&internal).Error; err == nil && internal > 0 {
 		return "destination is an internal wallet address"
 	}
@@ -221,13 +220,13 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 	if !ok || amount.Sign() <= 0 {
 		return "invalid amount"
 	}
-	if maxUnits, ok := new(big.Int).SetString(bootstrap.Cfg.Withdraw.MaxAmountUnits, 10); ok && maxUnits.Sign() > 0 && amount.Cmp(maxUnits) > 0 {
+	if maxUnits, ok := new(big.Int).SetString(config.Cfg.Withdraw.MaxAmountUnits, 10); ok && maxUnits.Sign() > 0 && amount.Cmp(maxUnits) > 0 {
 		return "amount exceeds the single withdrawal limit"
 	}
-	if limit, ok := new(big.Int).SetString(bootstrap.Cfg.Withdraw.DailyMaxUnits, 10); ok && limit.Sign() > 0 {
+	if limit, ok := new(big.Int).SetString(config.Cfg.Withdraw.DailyMaxUnits, 10); ok && limit.Sign() > 0 {
 		var sum string
 		since := time.Now().Truncate(24 * time.Hour)
-		w.st.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
+		store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 			Select("COALESCE(SUM(amount_units),0)").
 			Where("created_at >= ? AND status NOT IN ?", since,
 				[]string{model.WithdrawStateFailed, model.WithdrawStateRejected}).
@@ -243,7 +242,7 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 
 func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason string) error {
 	now := time.Now()
-	return w.st.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&model.WithdrawRecord{}).
 			Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
 			UpdateColumns(map[string]any{
@@ -261,7 +260,7 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 // exactly once per order.
 func (w *Worker) Reconcile(ctx context.Context) error {
 	var rows []model.WithdrawRecord
-	err := w.st.DB.WithContext(ctx).
+	err := store.MyStore.DB.WithContext(ctx).
 		Where("status IN ?", []string{model.WithdrawStateSigned, model.WithdrawStateBroadcast}).
 		Order("id asc").Limit(100).Find(&rows).Error
 	if err != nil {
@@ -322,8 +321,8 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 	// same raw data again, which is deterministic for the same key and payload.
 	signed, err := w.sign.Sign(ctx, &signer.SignRequest{
 		Purpose: signer.PurposeWithdraw,
-		Path:    bootstrap.Cfg.Wallet.HotWallet.Path,
-		Address: bootstrap.Cfg.Wallet.HotWallet.Address,
+		Path:    config.Cfg.Wallet.HotWallet.Path,
+		Address: config.Cfg.Wallet.HotWallet.Address,
 		Tx:      tx,
 		Meta: signer.SignMeta{
 			ToAddress:   row.ToAddress,
@@ -342,7 +341,7 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 }
 
 func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, reason string, energyUsed, fee int64, now time.Time) error {
-	return w.st.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
 			"status":      status,
 			"fail_reason": truncate(reason, 240),
@@ -390,15 +389,15 @@ func (w *Worker) event(row *model.WithdrawRecord, outcome, reason string, now ti
 }
 
 func (w *Worker) confirmBlocks() int64 {
-	if bootstrap.Cfg.Withdraw.ConfirmBlocks > 0 {
-		return bootstrap.Cfg.Withdraw.ConfirmBlocks
+	if config.Cfg.Withdraw.ConfirmBlocks > 0 {
+		return config.Cfg.Withdraw.ConfirmBlocks
 	}
-	return bootstrap.Cfg.Deposit.Confirmations
+	return config.Cfg.Deposit.Confirmations
 }
 
 func (w *Worker) expirationSeconds() int64 {
-	if bootstrap.Cfg.Withdraw.TxExpirationSec > 0 {
-		return bootstrap.Cfg.Withdraw.TxExpirationSec
+	if config.Cfg.Withdraw.TxExpirationSec > 0 {
+		return config.Cfg.Withdraw.TxExpirationSec
 	}
 	return 60
 }

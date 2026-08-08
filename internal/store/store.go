@@ -27,8 +27,10 @@ type Store struct {
 	prefix string
 }
 
-func Open(cfg *config.Config) (*Store, error) {
-	gdb, err := gorm.Open(mysql.Open(cfg.MySQL.DSN), &gorm.Config{
+var MyStore *Store
+
+func Open() (*Store, error) {
+	gdb, err := gorm.Open(mysql.Open(config.Cfg.MySQL.DSN), &gorm.Config{
 		// "record not found" is an expected outcome for most lookups here, so
 		// it must not drown out the warnings that matter.
 		Logger: logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{
@@ -44,25 +46,26 @@ func Open(cfg *config.Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.MySQL.MaxOpenConns > 0 {
-		sqlDB.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
+	if config.Cfg.MySQL.MaxOpenConns > 0 {
+		sqlDB.SetMaxOpenConns(config.Cfg.MySQL.MaxOpenConns)
 	}
-	if cfg.MySQL.MaxIdleConns > 0 {
-		sqlDB.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
+	if config.Cfg.MySQL.MaxIdleConns > 0 {
+		sqlDB.SetMaxIdleConns(config.Cfg.MySQL.MaxIdleConns)
 	}
-	sqlDB.SetConnMaxLifetime(config.Duration(cfg.MySQL.ConnMaxLifetime, time.Hour))
+	sqlDB.SetConnMaxLifetime(config.Duration(config.Cfg.MySQL.ConnMaxLifetime, time.Hour))
 
-	s := &Store{DB: gdb, prefix: cfg.Redis.Prefix}
-	if cfg.Redis.Addr != "" {
+	s := &Store{DB: gdb, prefix: config.Cfg.Redis.Prefix}
+	if config.Cfg.Redis.Addr != "" {
 		s.Redis = redis.NewClient(&redis.Options{
-			Addr:     cfg.Redis.Addr,
-			Password: cfg.Redis.Password,
-			DB:       cfg.Redis.DB,
+			Addr:     config.Cfg.Redis.Addr,
+			Password: config.Cfg.Redis.Password,
+			DB:       config.Cfg.Redis.DB,
 		})
 	}
 	if s.prefix == "" {
 		s.prefix = "trc20"
 	}
+	MyStore = s
 	return s, nil
 }
 

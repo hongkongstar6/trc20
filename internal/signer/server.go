@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/hongkongstar6/trc20/internal/bootstrap"
+	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
 	"github.com/sirupsen/logrus"
@@ -88,11 +88,11 @@ func PolicyFromConfig() Policy {
 	policy := Policy{
 		TopupWhitelist:    map[string]string{},
 		AllowedContracts:  map[string]bool{},
-		GasAccountAddress: bootstrap.Cfg.Energy.AutoTopup.SourceAddress,
-		SweepDestination:  bootstrap.Cfg.Wallet.FinanceWallet.Address,
-		WithdrawFrom:      bootstrap.Cfg.Wallet.HotWallet.Address,
+		GasAccountAddress: config.Cfg.Energy.AutoTopup.SourceAddress,
+		SweepDestination:  config.Cfg.Wallet.FinanceWallet.Address,
+		WithdrawFrom:      config.Cfg.Wallet.HotWallet.Address,
 	}
-	for name, conf := range bootstrap.Cfg.Energy.AutoTopup.Providers {
+	for name, conf := range config.Cfg.Energy.AutoTopup.Providers {
 		if conf.DepositAddress != "" {
 			policy.TopupWhitelist[name] = conf.DepositAddress
 		}
@@ -100,7 +100,7 @@ func PolicyFromConfig() Policy {
 			policy.TopupMaxSun = cap
 		}
 	}
-	for _, token := range bootstrap.Cfg.Wallet.Tokens {
+	for _, token := range config.Cfg.Wallet.Tokens {
 		if token.Enabled {
 			policy.AllowedContracts[token.Contract] = true
 		}
@@ -109,12 +109,12 @@ func PolicyFromConfig() Policy {
 }
 
 // NewDBAudit persists every signing decision, allowed or refused.
-func NewDBAudit(st *store.Store) AuditSink {
-	return &dbAudit{st: st}
+func NewDBAudit() AuditSink {
+	return &dbAudit{}
 }
 
 type dbAudit struct {
-	st *store.Store
+	//st *store.Store
 	//log *logrus.Logger
 }
 
@@ -123,7 +123,7 @@ func (a *dbAudit) Record(ctx context.Context, purpose, path, address, txid, call
 		Purpose: purpose, Path: path, Address: address, TxID: txid,
 		Caller: caller, Allowed: allowed, Reason: reason, CreatedAt: time.Now(),
 	}
-	if err := a.st.DB.WithContext(ctx).Create(row).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(ctx).Create(row).Error; err != nil {
 		// Audit must never silently vanish, but it must not block signing of a
 		// legitimate request either.
 		logrus.Error("sign audit write failed", "purpose", purpose, "allowed", allowed, "err", err)

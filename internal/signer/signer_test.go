@@ -257,7 +257,8 @@ func TestPolicyFromConfig(t *testing.T) {
 		"gasstation":     {DepositAddress: depositAddr, MaxSingleTopupTRX: 4000},
 		"tronenergyrent": {DepositAddress: outsideAddr, MaxSingleTopupTRX: 1000},
 	}
-	policy := PolicyFromConfig(cfg)
+	config.Cfg = cfg
+	policy := PolicyFromConfig()
 
 	if policy.WithdrawFrom != outsideAddr || policy.SweepDestination != financeAddr {
 		t.Fatalf("named addresses not carried over: %+v", policy)

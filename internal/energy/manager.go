@@ -25,8 +25,8 @@ const FeeModeBurn = "burn"
 // Callers never talk to a provider directly.
 type Manager struct {
 	cfg config.EnergyConfig
-	st  *store.Store
-	gw  *chain.Gateway
+	//st  *store.Store
+	gw *chain.Gateway
 	//log   *logrus.Logger
 	provs map[string]Provider
 
@@ -39,8 +39,10 @@ type cachedQuote struct {
 	expires time.Time
 }
 
-func NewManager(cfg config.EnergyConfig, st *store.Store, gw *chain.Gateway, log *logrus.Logger, provs map[string]Provider) *Manager {
-	return &Manager{cfg: cfg, st: st, gw: gw,
+func NewManager(cfg config.EnergyConfig, gw *chain.Gateway, provs map[string]Provider) *Manager {
+	return &Manager{cfg: cfg,
+		//st: st,
+		gw: gw,
 		//log: log,
 		provs: provs, quotes: map[string]cachedQuote{}}
 }
@@ -166,10 +168,10 @@ func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need in
 		Status:          model.EnergyOrderCreated,
 		Purpose:         purpose,
 	}
-	if err := m.st.DB.WithContext(ctx).Create(row).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(ctx).Create(row).Error; err != nil {
 		// A duplicate request id means this rental was already attempted.
 		var existing model.EnergyRentOrder
-		if e := m.st.DB.WithContext(ctx).Where("request_id = ?", requestID).Take(&existing).Error; e == nil {
+		if e := store.MyStore.DB.WithContext(ctx).Where("request_id = ?", requestID).Take(&existing).Error; e == nil {
 			row = &existing
 		} else {
 			return nil, err
@@ -189,14 +191,14 @@ func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need in
 		IdempotencyKey: requestID,
 	})
 	if err != nil {
-		m.st.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
+		store.MyStore.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
 			"status":          model.EnergyOrderFailed,
 			"provider_status": truncate(err.Error(), 32),
 			"updated_at":      time.Now(),
 		})
 		return nil, fmt.Errorf("energy: %s order failed: %w", quote.Provider, err)
 	}
-	m.st.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
+	store.MyStore.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
 		"provider_order_id": order.ProviderOrderID,
 		"provider_status":   order.ProviderState,
 		"updated_at":        time.Now(),
@@ -234,7 +236,7 @@ func (m *Manager) wait(ctx context.Context, provider Provider, row *model.Energy
 					return order, nil
 				}
 			case StateFailed, StateCancelled:
-				m.st.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
+				store.MyStore.DB.WithContext(ctx).Model(row).UpdateColumns(map[string]any{
 					"status": model.EnergyOrderFailed, "provider_status": order.ProviderState, "updated_at": time.Now(),
 				})
 				return nil, fmt.Errorf("energy: %s order %s ended in state %s", provider.Name(), pollKey, order.ProviderState)
@@ -280,7 +282,7 @@ func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder,
 			updates["cost_trx"] = order.CostTRX
 		}
 	}
-	if err := m.st.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
+	if err := store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
 		Where("id = ?", row.ID).UpdateColumns(updates).Error; err != nil {
 		logrus.Error("update energy order failed", "id", row.ID, "err", err)
 	}

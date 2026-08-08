@@ -106,7 +106,8 @@ services:
     depends_on: [api, sign] #启动withdraw服务前，确保api,sign服务已经启动
     volumes:
       - ./log:/app/log
-      - ./.env:/app/.env #  添加这一行：将本地的 .env 挂载到容器内的工作目录
+      #  添加这一行：将本地的 .env 挂载到容器内的工作目录
+      - ./.env:/app/.env 
     networks: [wallet]
 
   sweep:
@@ -118,7 +119,8 @@ services:
     depends_on: [api, sign] #启动sweep服务前，确保api,sign服务已经启动
     volumes:
       - ./log:/app/log      
-      - ./.env:/app/.env #添加这一行：将本地的 .env 挂载到容器内的工作目录
+      #添加这一行：将本地的 .env 挂载到容器内的工作目录
+      - ./.env:/app/.env 
     networks: [wallet]
 
 volumes:

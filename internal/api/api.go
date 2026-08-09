@@ -30,17 +30,17 @@ import (
 )
 
 type Server struct {
+	sign *signer.Client
 	//cfg  *config.Config
 	//st   *store.Store
-	sign *signer.Client
 	//log  *logrus.Logger
 }
 
 func New(sign *signer.Client) *Server {
 	return &Server{
+		sign: sign,
 		//cfg:  cfg,
 		//st:   st,
-		sign: sign,
 		//log: log
 	}
 }

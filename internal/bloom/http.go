@@ -82,7 +82,7 @@ func (r *Registry) Serve(ctx context.Context) error {
 // the caller must not fail the allocation because the scanner is momentarily
 // down, the periodic Sync picks the address up in that case.
 func Notify(ctx context.Context, addresses ...string) error {
-	url := config.Cfg.Bloom.NotifyURL
+	url := config.Cfg.Bloom.BloomNotifyURL
 	if url == "" || len(addresses) == 0 {
 		return nil
 	}

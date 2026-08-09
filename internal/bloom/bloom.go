@@ -16,17 +16,17 @@ const (
 )
 
 // Filter is a classic bit-array bloom filter, safe for concurrent use.
-type Filter struct {
+type BloomFilter struct {
 	mu       sync.RWMutex
-	bits     []uint64
-	m        uint64 // bit count
-	k        uint64 // hash count
-	n        uint64 // inserted keys
-	capacity uint64 // key count the filter was sized for
+	bits     []uint64 // 使用 uint64 切片来存储 BitSet，内存效率最高
+	m        uint64   // bit count 位数组的总长度
+	k        uint64   // hash count 哈希函数的个数
+	count    uint64   // inserted keys 当前已插入的元素数量
+	capacity uint64   // key count the filter was sized for
 }
 
 // New sizes a filter for expected keys at the target false positive rate.
-func New(expected uint64, fpRate float64) *Filter {
+func New(expected uint64, fpRate float64) *BloomFilter {
 	if expected == 0 {
 		expected = 1
 	}
@@ -34,7 +34,7 @@ func New(expected uint64, fpRate float64) *Filter {
 		fpRate = 0.0001
 	}
 	m, k := Estimate(expected, fpRate)
-	return &Filter{
+	return &BloomFilter{
 		bits:     make([]uint64, (m+63)/64),
 		m:        m,
 		k:        k,
@@ -59,23 +59,25 @@ func Estimate(expected uint64, fpRate float64) (m, k uint64) {
 	return m, k
 }
 
-func (f *Filter) Add(key string) {
-	if f == nil || key == "" {
+func (f *BloomFilter) Add(address string) {
+	if f == nil || address == "" {
 		return
 	}
-	h1, h2 := hashes(key)
+	h1, h2 := hashes(address)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i := uint64(0); i < f.k; i++ {
 		idx := (h1 + i*h2) % f.m
-		f.bits[idx/64] |= 1 << (idx % 64)
+		wordIndex := idx / 64
+		bitOffset := idx % 64
+		f.bits[wordIndex] |= 1 << (bitOffset)
 	}
-	f.n++
+	f.count++
 }
 
 // MayContain reports whether key may have been added. False is definitive.
 // A nil filter answers true so callers degrade to the database lookup.
-func (f *Filter) MayContain(key string) bool {
+func (f *BloomFilter) MayContain(key string) bool {
 	if f == nil {
 		return true
 	}
@@ -95,35 +97,35 @@ func (f *Filter) MayContain(key string) bool {
 }
 
 // Count is the number of Add calls, duplicates included.
-func (f *Filter) Count() uint64 {
+func (f *BloomFilter) Count() uint64 {
 	if f == nil {
 		return 0
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.n
+	return f.count
 }
 
 // Capacity is the key count the filter was sized for. Beyond it the false
 // positive rate degrades and the owner should rebuild a larger filter.
-func (f *Filter) Capacity() uint64 {
+func (f *BloomFilter) Capacity() uint64 {
 	if f == nil {
 		return 0
 	}
 	return f.capacity
 }
 
-func (f *Filter) Bits() uint64 { return f.m }
+func (f *BloomFilter) Bits() uint64 { return f.m }
 
-func (f *Filter) Hashes() uint64 { return f.k }
+func (f *BloomFilter) Hashes() uint64 { return f.k }
 
 // FalsePositiveRate estimates the current rate for the keys inserted so far.
-func (f *Filter) FalsePositiveRate() float64 {
+func (f *BloomFilter) FalsePositiveRate() float64 {
 	if f == nil {
 		return 1
 	}
 	f.mu.RLock()
-	n := float64(f.n)
+	n := float64(f.count)
 	f.mu.RUnlock()
 	exp := -float64(f.k) * n / float64(f.m)
 	return math.Pow(1-math.Exp(exp), float64(f.k))

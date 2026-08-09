@@ -21,7 +21,7 @@ var AddrFilter *Registry
 // the api process.
 type Registry struct {
 	mu     sync.RWMutex
-	filter *Filter
+	filter *BloomFilter
 	maxID  int64
 
 	pageSize int
@@ -157,7 +157,7 @@ func (r *Registry) rebuild(ctx context.Context, capacity uint64) error {
 	return nil
 }
 
-func (r *Registry) reload(ctx context.Context, into *Filter) error {
+func (r *Registry) reload(ctx context.Context, into *BloomFilter) error {
 	maxID, err := r.load(ctx, into)
 	if err != nil {
 		return err
@@ -166,7 +166,7 @@ func (r *Registry) reload(ctx context.Context, into *Filter) error {
 	return nil
 }
 
-func (r *Registry) load(ctx context.Context, into *Filter) (int64, error) {
+func (r *Registry) load(ctx context.Context, into *BloomFilter) (int64, error) {
 	var maxID int64
 	for {
 		rows, err := store.UserWalletAddressesAfter(ctx, maxID, r.batch())

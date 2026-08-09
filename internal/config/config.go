@@ -45,10 +45,10 @@ type BloomConfig struct {
 	// Listen is the address sync port of the scanner process; NotifyURL is the
 	// same endpoint as seen by the api process, which pushes every freshly
 	// allocated address to it. Token authenticates that push.
-	Listen        string `yaml:"listen"`
-	NotifyURL     string `yaml:"notify_url"`
-	Token         string `yaml:"token"`
-	NotifyTimeout string `yaml:"notify_timeout"`
+	Listen         string `yaml:"listen"`
+	BloomNotifyURL string `yaml:"bloom_notify_url"`
+	Token          string `yaml:"token"`
+	NotifyTimeout  string `yaml:"notify_timeout"`
 	// SyncInterval is the fallback for a push that did not arrive (scanner
 	// restart, network blip): the process re-reads user_wallet by id.
 	SyncInterval string `yaml:"sync_interval"`

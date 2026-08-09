@@ -21,6 +21,10 @@ import (
 
 const addressPath = "/internal/bloom/address"
 
+// notifyRetryDelay is the single retry a failed push gets. Beyond that the
+// scanner picks the address up on its next user_wallet sync.
+var notifyRetryDelay = 10 * time.Second
+
 // type AddressRequest struct {
 // 	Addresses []string `json:"addresses" binding:"required"`
 // }
@@ -29,9 +33,9 @@ const addressPath = "/internal/bloom/address"
 // allocated addresses into it. Adding an address is idempotent, so a retried
 // or duplicated push is harmless.
 func Serve(ctx context.Context) error {
-	// if r == nil || config.Cfg.Bloom.Listen == "" {
-	// 	return nil
-	// }
+	if AddrFilter == nil {
+		return fmt.Errorf("bloom serve: address filter is not initialised")
+	}
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
@@ -83,6 +87,30 @@ func BloomAddAddress(c *gin.Context) {
 	}
 	logrus.Info("address pushed into bloom filter", ",added:", added, ",total:", AddrFilter.Count())
 	c.JSON(http.StatusOK, gin.H{"added": added, "total": AddrFilter.Count()})
+}
+
+// NotifyWithRetry pushes the addresses to the scanner and retries once after
+// notifyRetryDelay. It runs detached from the request: the allocation must not
+// wait for, or fail with, a momentarily unreachable scanner.
+func NotifyWithRetry(addresses ...string) {
+	if config.Cfg.Bloom.BloomNotifyURL == "" || len(addresses) == 0 {
+		return
+	}
+	go func() {
+		err := Notify(context.Background(), addresses...)
+		if err == nil {
+			return
+		}
+		logrus.Error("push address to scanner failed, retrying",
+			",addresses:", addresses, ",retry_in:", notifyRetryDelay, ",err:", err)
+		time.Sleep(notifyRetryDelay)
+		if err := Notify(context.Background(), addresses...); err != nil {
+			// Giving up is safe: the scanner re-reads user_wallet by id every
+			// sync_interval, so the address is matched from then on.
+			logrus.Error("push address to scanner failed, leaving it to the scanner sync",
+				",addresses:", addresses, ",err:", err)
+		}
+	}()
 }
 
 // Notify pushes addresses to the scanner process. It is best effort on purpose:

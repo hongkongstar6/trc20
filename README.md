@@ -38,6 +38,15 @@
 
 （自托管的 FullNode 和/或 TronGrid），具有查询故障转移功能，以及一条广播路径
 该路径将*相同的签名字节*发送到备用节点，而不是重建
+
+TronGrid 按 API Key 限速（免费 Key 15 次/秒），超限会把整个 Key 暂停几十秒。
+网关内置每节点令牌桶（`chain.nodes[].qps` / `burst`，trongrid 类型默认 10 QPS）
+在请求发出前限速；收到 429 时按 `Retry-After` 或响应体里的
+`suspended for N s` 把该节点挂起，期间只走其它节点，若节点全部被限流则最多
+等待 `chain.rate_limit_wait`（默认 60s）后再报错——扫块宁可等待也不能跳块。
+注意限额是按 Key 统计的：scanner / api / sweep / withdraw 共用同一个 Key 时，
+每个进程的 `qps` 之和才是实际用量。
+
 cmd/api/main.go — 业务侧钱包 HTTP API 服务（wallet-api），同时兼任 notify outbox 的分发器，小型部署只需这一个常驻进程配合 worker。它初始化 signer 客户端、按配置启用 HTTP/RocketMQ 发布器运行 outbox.Dispatcher，并启动 http.Server。 main.go:1-3 main.go:44-59
 
 cmd/scanner/main.go — 充值扫描服务（deposit-scanner）：区块扫描、确认数处理与 reorg 处理，运行 scanner.New(...).Run(ctx)。 main.go:1-2 main.go:18-21

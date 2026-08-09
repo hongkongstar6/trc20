@@ -29,31 +29,48 @@ import (
 var ErrNoNodeAvailable = errors.New("chain: no node available")
 
 type node struct {
-	conf   config.NodeConfig
-	client *http.Client
+	conf    config.NodeConfig
+	client  *http.Client
+	limiter *limiter
+	cool    cooldown
 }
 
 // Gateway routes JSON HTTP calls to the healthiest node by priority.
 type Gateway struct {
-	nodes            []node
+	nodes            []*node
 	retryPerNode     int
 	solidityConfirm  bool
 	broadcastTimeout time.Duration
+	// rateLimitWait bounds how long a call may sit waiting for a throttled
+	// node to reopen. Waiting is correct for the scanner (skipping a block
+	// loses deposits), but it must not block a caller forever.
+	rateLimitWait time.Duration
 }
+
+// defaultTronGridQPS stays under the 15 req/s of a free TronGrid key: the key
+// is suspended for tens of seconds once the limit is hit, which costs far more
+// throughput than the few requests per second given up here.
+const defaultTronGridQPS = 10
 
 func NewGateway(c config.ChainConfig) (*Gateway, error) {
 	g := &Gateway{
 		retryPerNode:     max(c.RetryPerNode, 1),
 		solidityConfirm:  c.SolidityForConfirm,
 		broadcastTimeout: config.Duration(c.BroadcastTimeout, 20*time.Second),
+		rateLimitWait:    config.Duration(c.RateLimitWait, 60*time.Second),
 	}
 	for _, nc := range c.Nodes {
 		if !nc.Enabled {
 			continue
 		}
-		g.nodes = append(g.nodes, node{
-			conf:   nc,
-			client: &http.Client{Timeout: config.Duration(nc.Timeout, 15*time.Second)},
+		qps := nc.QPS
+		if qps == 0 && strings.EqualFold(nc.Type, "trongrid") {
+			qps = defaultTronGridQPS
+		}
+		g.nodes = append(g.nodes, &node{
+			conf:    nc,
+			client:  &http.Client{Timeout: config.Duration(nc.Timeout, 15*time.Second)},
+			limiter: newLimiter(qps, nc.Burst),
 		})
 	}
 	if len(g.nodes) == 0 {
@@ -83,21 +100,54 @@ func (g *Gateway) call(ctx context.Context, path string, body any, out any) erro
 		}
 	}
 	var lastErr error
-	for _, n := range g.nodes {
-		for attempt := 0; attempt < g.retryPerNode; attempt++ {
-			raw, err := n.do(ctx, path, payload)
-			if err != nil {
-				lastErr = fmt.Errorf("%s: %w", n.conf.Name, err)
+	giveUp := time.Now().Add(g.rateLimitWait)
+	for {
+		var reopen time.Duration // shortest cooldown left across all nodes
+		for _, n := range g.nodes {
+			if left := n.cool.remaining(); left > 0 {
+				if reopen == 0 || left < reopen {
+					reopen = left
+				}
 				continue
 			}
-			if out == nil {
+			for attempt := 0; attempt < g.retryPerNode; attempt++ {
+				raw, err := n.do(ctx, path, payload)
+				if err != nil {
+					lastErr = fmt.Errorf("%s: %w", n.conf.Name, err)
+					if errors.Is(err, errRateLimited) {
+						// Retrying the same node now would only deepen the
+						// suspension; it is parked until its cooldown ends.
+						if left := n.cool.remaining(); left > 0 && (reopen == 0 || left < reopen) {
+							reopen = left
+						}
+						break
+					}
+					continue
+				}
+				if out == nil {
+					return nil
+				}
+				if err := json.Unmarshal(raw, out); err != nil {
+					lastErr = fmt.Errorf("%s: decode %s: %w", n.conf.Name, path, err)
+					continue
+				}
 				return nil
 			}
-			if err := json.Unmarshal(raw, out); err != nil {
-				lastErr = fmt.Errorf("%s: decode %s: %w", n.conf.Name, path, err)
-				continue
-			}
-			return nil
+		}
+		if reopen <= 0 {
+			break // every failure was a real node failure
+		}
+		// Only throttling is left: wait for the first node to reopen rather
+		// than reporting an outage, so the caller does not skip work.
+		if time.Now().Add(reopen).After(giveUp) {
+			break
+		}
+		t := time.NewTimer(reopen + 100*time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
 		}
 	}
 	if lastErr == nil {
@@ -115,6 +165,11 @@ func (n *node) do(ctx context.Context, path string, payload []byte) ([]byte, err
 		method = http.MethodPost
 	}
 	logrus.Debugf("node_name:%s method:%s url:%s", n.conf.Name, method, url)
+	if n.limiter != nil {
+		if err := n.limiter.wait(ctx); err != nil {
+			return nil, err
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, err
@@ -134,6 +189,13 @@ func (n *node) do(ctx context.Context, path string, payload []byte) ([]byte, err
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		body := truncate(string(raw), 200)
+		retryAfter := parseRetryAfter(resp.Header, string(raw))
+		n.cool.set(retryAfter)
+		logrus.Warnf("node_name:%s rate limited, backing off %s, body:%s", n.conf.Name, retryAfter, body)
+		return nil, &rateLimitError{body: body}
 	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(raw), 200))
@@ -513,6 +575,10 @@ func (g *Gateway) Broadcast(ctx context.Context, tx *tron.Transaction) (*Broadca
 	}
 	var lastErr error
 	for _, n := range g.nodes {
+		if left := n.cool.remaining(); left > 0 {
+			lastErr = fmt.Errorf("%s: rate limited for another %s", n.conf.Name, left.Truncate(time.Second))
+			continue
+		}
 		raw, err := n.do(ctx, "/wallet/broadcasttransaction", payload)
 		if err != nil {
 			// Network level failure: we cannot tell whether the node accepted

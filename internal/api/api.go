@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/hd"
 	"github.com/hongkongstar6/trc20/internal/merchant"
@@ -282,6 +283,14 @@ func (s *Server) createAddress(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// A deposit to a brand new address can land in the very next block, so the
+	// filter is extended as soon as the row is committed and the address is
+	// pushed to the scanner process. A failed push is not an allocation error:
+	// the scanner also syncs new rows from user_wallet periodically.
+	bloom.AddrFilter.Add(address)
+	if err := bloom.Notify(c, address); err != nil {
+		logrus.Error("push address to scanner failed", ",address:", address, ",err:", err)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"merchant_id": merchantID, "uid": uid, "account": account,

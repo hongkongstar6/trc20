@@ -151,6 +151,18 @@ func UserWalletsByAddresses(ctx context.Context, addresses []string, wallets *[]
 	return err
 }
 
+// UserWalletAddressesAfter pages over user_wallet ordered by id, reading only
+// the two columns the address filter needs. afterID = 0 starts from the first
+// row, so the same call does both the startup load and the incremental sync.
+func UserWalletAddressesAfter(ctx context.Context, afterID int64, limit int) ([]model.UserWallet, error) {
+	var rows []model.UserWallet
+	err := MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).
+		Select("id", "address").
+		Where("id > ?", afterID).
+		Order("id asc").Limit(limit).Find(&rows).Error
+	return rows, err
+}
+
 func IsInternalWallet(ctx context.Context, row *model.WithdrawRecord, internal *int64) error {
 	//var internal int64
 	err := MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).

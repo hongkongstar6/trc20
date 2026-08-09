@@ -149,12 +149,15 @@ type NamedAddress struct {
 }
 
 type DepositConfig struct {
-	StartBlock      int64  `yaml:"start_block"`
-	BatchBlocks     int64  `yaml:"batch_blocks"`
-	Confirmations   int64  `yaml:"confirmations"`
-	PollInterval    string `yaml:"poll_interval"`
-	ReorgDepth      int64  `yaml:"reorg_depth"`
-	MinDepositUnits string `yaml:"min_deposit_units"` // dust filter, min units
+	StartBlock  int64 `yaml:"start_block"`
+	BatchBlocks int64 `yaml:"batch_blocks"`
+	// How many blocks of the batch are downloaded in parallel. One block needs
+	// two RPC calls, so a serial scanner cannot outrun the chain itself.
+	FetchConcurrency int64  `yaml:"fetch_concurrency"`
+	Confirmations    int64  `yaml:"confirmations"`
+	PollInterval     string `yaml:"poll_interval"`
+	ReorgDepth       int64  `yaml:"reorg_depth"`
+	MinDepositUnits  string `yaml:"min_deposit_units"` // dust filter, min units
 }
 
 type WithdrawConfig struct {
@@ -401,6 +404,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Deposit.BatchBlocks <= 0 {
 		c.Deposit.BatchBlocks = 20
+	}
+	if c.Deposit.FetchConcurrency <= 0 {
+		c.Deposit.FetchConcurrency = 8
+	}
+	if c.Deposit.FetchConcurrency > c.Deposit.BatchBlocks {
+		c.Deposit.FetchConcurrency = c.Deposit.BatchBlocks
 	}
 	if c.Deposit.Confirmations <= 0 {
 		c.Deposit.Confirmations = 19

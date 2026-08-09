@@ -91,6 +91,7 @@ wallet:
 deposit:
     start_block: 0 # 0 means start from the current head
     batch_blocks: 20
+    fetch_concurrency: 8 # 一个区块要两次 RPC，串行扫块追不上出块速度
     confirmations: 19 # TRON finality is ~19 blocks (SR round)
     poll_interval: 3s
     reorg_depth: 60

@@ -89,6 +89,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 	for {
 		behind, err := s.tick(ctx)
 		if err != nil {
+			logrus.Error("tick,err:", err.Error())
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
@@ -141,8 +142,11 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 	for i := range fetched {
 		num := from + int64(i)
 		if fetched[i].err != nil {
+			logrus.Info("当前区块读取失败：", cursor.BlockNumber, "err:", err)
 			return false, fmt.Errorf("block %d: %w", num, fetched[i].err)
 		}
+		logrus.Info("当前区块读取成功：", cursor.BlockNumber)
+
 		block := fetched[i].block
 		if cursor.BlockHash != "" && block.BlockHeader.RawData.ParentHash != "" &&
 			!strings.EqualFold(block.BlockHeader.RawData.ParentHash, cursor.BlockHash) {
@@ -284,6 +288,7 @@ func (s *Scanner) cursorOnChain(ctx context.Context, c *model.ChainCursor, head 
 
 // 保存数据库游标
 func saveCursor(ctx context.Context, c *model.ChainCursor) error {
+	logrus.Info("更新区块：", c.BlockNumber)
 	return store.MyStore.DB.WithContext(ctx).Model(&model.ChainCursor{}).
 		Where("name = ?", c.Name).
 		UpdateColumns(map[string]any{
@@ -561,6 +566,7 @@ func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.Cha
 		if err := tx.Where("block_number = ?", forkPoint).Take(&snap).Error; err == nil {
 			cursor.BlockHash = snap.BlockHash
 		}
+		logrus.Info("更新区块：", cursor.BlockNumber)
 		return tx.Model(&model.ChainCursor{}).Where("name = ?", cursor.Name).
 			UpdateColumns(map[string]any{
 				"block_number": cursor.BlockNumber,

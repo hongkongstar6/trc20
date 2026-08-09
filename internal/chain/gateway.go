@@ -21,6 +21,7 @@ import (
 
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/tron"
+	"github.com/sirupsen/logrus"
 )
 
 // ErrNoNodeAvailable means every configured node failed. Callers must stop
@@ -113,6 +114,7 @@ func (n *node) do(ctx context.Context, path string, payload []byte) ([]byte, err
 		reader = bytes.NewReader(payload)
 		method = http.MethodPost
 	}
+	logrus.Debugf("node_name:%s method:%s url:%s", n.conf.Name, method, url)
 	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, err

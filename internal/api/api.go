@@ -230,7 +230,7 @@ func (s *Server) createAddress(c *gin.Context) {
 	}
 
 	account := merchant.Account(merchantID, uid)
-	var existing model.Wallet
+	var existing model.UserWallet
 	err = store.MyStore.DB.WithContext(c).
 		Where("account = ? AND chain = ? AND purpose = ?", account, "TRON", "deposit").
 		Take(&existing).Error
@@ -259,7 +259,7 @@ func (s *Server) createAddress(c *gin.Context) {
 	}
 	logrus.Info("生成地址的路径:", account, path, address)
 
-	wallet := model.Wallet{
+	wallet := model.UserWallet{
 		MerchantID: merchantID,
 		UID:        uid,
 		Account:    account,

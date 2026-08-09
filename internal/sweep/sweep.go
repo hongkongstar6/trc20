@@ -101,7 +101,7 @@ func (s *Service) round(ctx context.Context) error {
 }
 
 // candidates are deposit addresses with confirmed unswept deposits.
-func (s *Service) candidates(ctx context.Context) ([]model.Wallet, error) {
+func (s *Service) candidates(ctx context.Context) ([]model.UserWallet, error) {
 	var addresses []string
 	err := store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
 		Distinct("to_address").
@@ -113,9 +113,10 @@ func (s *Service) candidates(ctx context.Context) ([]model.Wallet, error) {
 	if len(addresses) == 0 {
 		return nil, nil
 	}
-	var wallets []model.Wallet
-	err = store.MyStore.DB.WithContext(ctx).
-		Where("address IN ? AND purpose = ?", addresses, "deposit").Find(&wallets).Error
+	var wallets []model.UserWallet
+	err = store.UserWalletsByAddresses(ctx, addresses, &wallets)
+	// err = store.MyStore.DB.WithContext(ctx).
+	// 	Where("address IN ? AND purpose = ?", addresses, "deposit").Find(&wallets).Error
 	return wallets, err
 }
 
@@ -164,7 +165,7 @@ func (s *Service) tokenBalance(ctx context.Context, address string) (*big.Int, e
 
 // sweepOne performs the full sweep for a single address under a lock so two
 // workers can never spend the same balance twice.
-func (s *Service) sweepOne(ctx context.Context, wallet model.Wallet, amount *big.Int) error {
+func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount *big.Int) error {
 	unlock, ok := store.MyStore.Lock(ctx, "sweep:"+wallet.Address, config.Duration(config.Cfg.Sweep.LockTTL, 10*time.Minute))
 	if !ok {
 		return nil

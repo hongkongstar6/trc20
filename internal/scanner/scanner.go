@@ -53,8 +53,9 @@ func New(gw *chain.Gateway) *Scanner {
 		minUnit = big.NewInt(0)
 	}
 	return &Scanner{
-		gw:     gw,
-		tokens: tokens, minUnit: minUnit,
+		gw:      gw,
+		tokens:  tokens,
+		minUnit: minUnit,
 		//st: st,
 		//log:    log,
 	}
@@ -86,7 +87,7 @@ func (s *Scanner) tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("head: %w", err)
 	}
-	cursor, err := s.loadCursor(ctx, head.Number())
+	cursor, err := loadCursor(ctx, head.Number())
 	if err != nil {
 		return err
 	}
@@ -114,19 +115,21 @@ func (s *Scanner) tick(ctx context.Context) error {
 			cursor = newCursor
 			return nil // restart from the rolled back cursor on the next tick
 		}
+		//扫描区块数据，提取出转账事件，写入数据库
 		if err := s.scanBlock(ctx, block); err != nil {
 			return fmt.Errorf("scan block %d: %w", num, err)
 		}
 		cursor.BlockNumber = block.Number()
 		cursor.BlockHash = block.BlockID
-		if err := s.saveCursor(ctx, cursor); err != nil {
+		if err := saveCursor(ctx, cursor); err != nil {
 			return err
 		}
 	}
 	return s.pruneSnapshots(ctx, to)
 }
 
-func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCursor, error) {
+// 从数据库加载游标，如果没有则创建一个新的游标
+func loadCursor(ctx context.Context, head int64) (*model.ChainCursor, error) {
 	var c model.ChainCursor
 	err := store.MyStore.DB.WithContext(ctx).Where("name = ?", cursorName).Take(&c).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -143,7 +146,8 @@ func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCurso
 	return &c, err
 }
 
-func (s *Scanner) saveCursor(ctx context.Context, c *model.ChainCursor) error {
+// 保存数据库游标
+func saveCursor(ctx context.Context, c *model.ChainCursor) error {
 	return store.MyStore.DB.WithContext(ctx).Model(&model.ChainCursor{}).
 		Where("name = ?", cursorName).
 		UpdateColumns(map[string]any{
@@ -209,6 +213,7 @@ type transfer struct {
 // database. A log has to be an indexed 3 topic Transfer event of an
 // allowlisted contract carrying a positive amount above the dust threshold;
 // anything else is not a deposit.
+// 解析区块数据，提取出转账事件，返回转账信息
 func (s *Scanner) decodeTransfer(lg chain.TxLog) (*transfer, bool) {
 	if len(lg.Topics) != 3 || !strings.EqualFold(lg.Topics[0], tron.TransferEventTopic) {
 		return nil, false
@@ -236,7 +241,12 @@ func (s *Scanner) decodeTransfer(lg chain.TxLog) (*transfer, bool) {
 	if s.minUnit.Sign() > 0 && amount.Cmp(s.minUnit) < 0 {
 		return nil, false // dust filter
 	}
-	return &transfer{contract: contract, token: tk, from: fromAddr, to: toAddr, amount: amount}, true
+	return &transfer{
+		contract: contract,
+		token:    tk,
+		from:     fromAddr,
+		to:       toAddr,
+		amount:   amount}, true
 }
 
 // parseLog validates one log entry and resolves the owning user.
@@ -245,7 +255,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	if !ok {
 		return nil, false, nil
 	}
-	var wallet model.Wallet
+	var wallet model.UserWallet
 	err := store.MyStore.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, nil
@@ -281,7 +291,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 
 func (s *Scanner) isInternal(ctx context.Context, from string) (bool, error) {
 	var count int64
-	if err := store.MyStore.DB.WithContext(ctx).Model(&model.Wallet{}).Where("address = ?", from).Count(&count).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).Where("address = ?", from).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil

@@ -58,7 +58,7 @@ func (Merchant) TableName() string { return "merchant" }
 
 // Wallet is a derived address. Private keys never live here: only the
 // derivation path, which is meaningless without the seed held by sign-service.
-type Wallet struct {
+type UserWallet struct {
 	ID         int64  `gorm:"primaryKey" json:"id"`
 	MerchantID string `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
 	UID        string `gorm:"column:uid;index" json:"uid"`
@@ -77,7 +77,7 @@ type Wallet struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-func (Wallet) TableName() string { return "wallet" }
+func (UserWallet) TableName() string { return "user_wallet" }
 
 // WalletIndexAllocator hands out monotonic derivation indexes. The uid is
 // never used as an index: it would leak business scale and overflow the path.
@@ -281,7 +281,7 @@ func (SignAudit) TableName() string { return "sign_audit" }
 func AllModels() []any {
 	return []any{
 		&Merchant{},
-		&Wallet{},
+		&UserWallet{},
 		&WalletIndexAllocator{},
 		&DepositRecord{},
 		&WithdrawRecord{},

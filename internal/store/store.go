@@ -144,3 +144,17 @@ func EnqueueOutbox(tx *gorm.DB, eventID, eventType, merchantID string, payload a
 	// Duplicate event ids are expected on replay and must not be an error.
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
+
+func UserWalletsByAddresses(ctx context.Context, addresses []string, wallets *[]model.UserWallet) error {
+	err := MyStore.DB.WithContext(ctx).
+		Where("address IN ? AND purpose = ?", addresses, "deposit").Find(wallets).Error
+	return err
+}
+
+func IsInternalWallet(ctx context.Context, row *model.WithdrawRecord, internal *int64) error {
+	//var internal int64
+	err := MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).
+		Where("address = ?", row.ToAddress).Count(internal).Error
+
+	return err
+}

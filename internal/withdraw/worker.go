@@ -212,10 +212,15 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 	// Withdrawing to one of our own deposit addresses would be an internal
 	// transfer with no user-visible effect; it must be handled off chain.
 	var internal int64
-	if err := store.MyStore.DB.WithContext(ctx).Model(&model.Wallet{}).
+	if err := store.MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).
 		Where("address = ?", row.ToAddress).Count(&internal).Error; err == nil && internal > 0 {
 		return "destination is an internal wallet address"
 	}
+
+	// if err := store.IsInternalWallet(ctx, row, &internal); err == nil && internal > 0 {
+	// 	return "destination is an internal wallet address"
+	// }
+
 	amount, ok := new(big.Int).SetString(row.AmountUnits, 10)
 	if !ok || amount.Sign() <= 0 {
 		return "invalid amount"

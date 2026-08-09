@@ -14,8 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-//归集
-
+// 归集
 func main() {
 	app, err := bootstrap.Init("sweep-service")
 	if err != nil {

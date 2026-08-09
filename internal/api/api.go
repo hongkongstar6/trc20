@@ -285,9 +285,9 @@ func (s *Server) createAddress(c *gin.Context) {
 		return
 	}
 	// A deposit to a brand new address can land in the very next block, so the
-	// address is pushed to the scanner as soon as the row is committed. The
-	// push is retried once out of band and never fails the allocation: the
-	// scanner also syncs new rows from user_wallet periodically.
+	// filter is extended as soon as the row is committed and the address is
+	// pushed to the scanner process. A failed push is not an allocation error:
+	// the scanner also syncs new rows from user_wallet periodically.
 	bloom.NotifyWithRetry(address)
 	c.JSON(http.StatusOK, gin.H{
 		"merchant_id": merchantID, "uid": uid, "account": account,
@@ -384,6 +384,7 @@ func (s *Server) listDeposits(c *gin.Context) {
 	limit := parseLimit(c, 200, 1000)
 	q := store.MyStore.DB.WithContext(c).Model(&model.DepositRecord{}).
 		Where("status = ? AND internal = ? AND confirmed_at BETWEEN ? AND ?", model.DepositStateConfirmed, false, from, to)
+
 	if merchantID := c.Query("merchant_id"); merchantID != "" {
 		q = q.Where("merchant_id = ?", merchantID)
 	}

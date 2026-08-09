@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -26,7 +27,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const cursorName = "tron_deposit"
+// legacyCursorName is the network agnostic name used before the cursor was
+// namespaced per network. A cursor written while pointing at nile sits 15M
+// blocks away from the mainnet head, so reusing it stalls the scanner in
+// ancient history instead of following the chain.
+const legacyCursorName = "tron_deposit"
+
+// cursorName isolates the scan position per network.
+func cursorName() string {
+	net := strings.ToLower(strings.TrimSpace(config.Cfg.Network))
+	if net == "" {
+		net = "unknown"
+	}
+	return legacyCursorName + ":" + net
+}
 
 type token struct {
 	symbol   string
@@ -37,6 +51,8 @@ type Scanner struct {
 	gw      *chain.Gateway
 	tokens  map[string]token // contract (base58) -> token
 	minUnit *big.Int
+	// the cursor is validated against the chain once per process start
+	cursorChecked bool
 	//cfg *config.Config
 	//st *store.Store
 	//log     *logrus.Logger
@@ -71,12 +87,24 @@ func (s *Scanner) Run(ctx context.Context) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		if err := s.tick(ctx); err != nil {
+		behind, err := s.tick(ctx)
+		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			// A node outage must stall the cursor, never skip blocks.
 			logrus.Error("scan tick failed", ",err:", err)
+		}
+		if err == nil && behind {
+			// Still lagging: keep scanning instead of idling for a whole
+			// interval, otherwise the backlog only shrinks by one batch per
+			// tick while the chain keeps producing blocks.
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+				continue
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -86,14 +114,16 @@ func (s *Scanner) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Scanner) tick(ctx context.Context) error {
+// tick scans one batch. It reports whether the cursor is still behind the head
+// after the batch, so Run can skip the poll interval while catching up.
+func (s *Scanner) tick(ctx context.Context) (bool, error) {
 	head, err := s.gw.GetNowBlock(ctx)
 	if err != nil {
-		return fmt.Errorf("head: %w", err)
+		return false, fmt.Errorf("head: %w", err)
 	}
-	cursor, err := loadCursor(ctx, head.Number())
+	cursor, err := s.loadCursor(ctx, head.Number())
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := s.confirmUpTo(ctx, head.Number()); err != nil {
 		logrus.Error("confirm pass failed", ",err:", err)
@@ -102,58 +132,160 @@ func (s *Scanner) tick(ctx context.Context) error {
 	from := cursor.BlockNumber + 1
 	to := min64(from+config.Cfg.Deposit.BatchBlocks-1, head.Number())
 	if from > to {
-		return nil
+		return false, nil
 	}
-	for num := from; num <= to; num++ {
-		block, err := s.gw.GetBlockByNum(ctx, num)
-		if err != nil {
-			return fmt.Errorf("block %d: %w", num, err)
+	// A block costs two sequential RPC round trips, so a strictly serial
+	// scanner barely keeps up with the block rate and never recovers a
+	// backlog. Blocks are prefetched concurrently and still applied in order.
+	fetched := s.fetchRange(ctx, from, to)
+	for i := range fetched {
+		num := from + int64(i)
+		if fetched[i].err != nil {
+			return false, fmt.Errorf("block %d: %w", num, fetched[i].err)
 		}
+		block := fetched[i].block
 		if cursor.BlockHash != "" && block.BlockHeader.RawData.ParentHash != "" &&
 			!strings.EqualFold(block.BlockHeader.RawData.ParentHash, cursor.BlockHash) {
 			logrus.Warn("reorg detected", "block", num, "parent", block.BlockHeader.RawData.ParentHash, "cursor_hash", cursor.BlockHash)
 			newCursor, err := s.handleReorg(ctx, num)
 			if err != nil {
-				return fmt.Errorf("reorg: %w", err)
+				return false, fmt.Errorf("reorg: %w", err)
 			}
 			cursor = newCursor
-			return nil // restart from the rolled back cursor on the next tick
+			return true, nil // restart from the rolled back cursor
 		}
 		//扫描区块数据，提取出转账事件，写入数据库
-		if err := s.scanBlock(ctx, block); err != nil {
-			return fmt.Errorf("scan block %d: %w", num, err)
+		if err := s.scanBlock(ctx, block, fetched[i].infos); err != nil {
+			return false, fmt.Errorf("scan block %d: %w", num, err)
 		}
 		cursor.BlockNumber = block.Number()
 		cursor.BlockHash = block.BlockID
 		if err := saveCursor(ctx, cursor); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return s.pruneSnapshots(ctx, to)
+	return to < head.Number(), s.pruneSnapshots(ctx, to)
 }
 
-// 从数据库加载游标，如果没有则创建一个新的游标
-func loadCursor(ctx context.Context, head int64) (*model.ChainCursor, error) {
+// blockData is one prefetched block together with its receipts.
+type blockData struct {
+	block *chain.Block
+	infos []chain.TxInfo
+	err   error
+}
+
+// fetchRange downloads [from, to] concurrently and returns the results in
+// ascending block order, so reorg detection and cursor updates stay sequential.
+func (s *Scanner) fetchRange(ctx context.Context, from, to int64) []blockData {
+	out := make([]blockData, to-from+1)
+	workers := int(config.Cfg.Deposit.FetchConcurrency)
+	if workers <= 0 {
+		workers = 1
+	}
+	if workers > len(out) {
+		workers = len(out)
+	}
+	nums := make(chan int64, len(out))
+	for num := from; num <= to; num++ {
+		nums <- num
+	}
+	close(nums)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for num := range nums {
+				block, err := s.gw.GetBlockByNum(ctx, num)
+				if err != nil {
+					out[num-from] = blockData{err: err}
+					continue
+				}
+				infos, err := s.gw.GetTxInfoByBlockNum(ctx, num)
+				out[num-from] = blockData{block: block, infos: infos, err: err}
+			}
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// loadCursor returns the scan position, creating it on the first run and
+// realigning it when it cannot belong to the chain the gateway is talking to
+// (a cursor left behind by another network, or a corrupted height).
+func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCursor, error) {
+	name := cursorName()
 	var c model.ChainCursor
-	err := store.MyStore.DB.WithContext(ctx).Where("name = ?", cursorName).Take(&c).Error
+	err := store.MyStore.DB.WithContext(ctx).Where("name = ?", name).Take(&c).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		start := config.Cfg.Deposit.StartBlock
-		if start <= 0 {
+		if start <= 0 || start > head {
 			start = head - 1
 		}
-		c = model.ChainCursor{Name: cursorName, BlockNumber: start}
+		// Adopt the pre-namespacing cursor, but only when it plausibly comes
+		// from this chain: otherwise the nile height would be inherited again.
+		var legacy model.ChainCursor
+		if store.MyStore.DB.WithContext(ctx).Where("name = ?", legacyCursorName).Take(&legacy).Error == nil {
+			if ok, err := s.cursorOnChain(ctx, &legacy, head); err != nil {
+				return nil, err
+			} else if ok {
+				start = legacy.BlockNumber
+				c.BlockHash = legacy.BlockHash
+			} else {
+				logrus.Warn("legacy cursor does not belong to this chain, starting from head",
+					"network", config.Cfg.Network, "legacy_block", legacy.BlockNumber, "head", head)
+			}
+		}
+		c.Name, c.BlockNumber = name, start
 		if err := store.MyStore.DB.WithContext(ctx).Create(&c).Error; err != nil {
 			return nil, err
 		}
 		return &c, nil
 	}
-	return &c, err
+	if err != nil {
+		return nil, err
+	}
+	if s.cursorChecked {
+		return &c, nil
+	}
+	ok, err := s.cursorOnChain(ctx, &c, head)
+	if err != nil {
+		return nil, err
+	}
+	s.cursorChecked = true
+	if !ok {
+		logrus.Error("cursor does not belong to this chain, realigning to head",
+			"network", config.Cfg.Network, "cursor_block", c.BlockNumber, "head", head)
+		c.BlockNumber, c.BlockHash = head-1, ""
+		if err := saveCursor(ctx, &c); err != nil {
+			return nil, err
+		}
+	}
+	return &c, nil
+}
+
+// cursorOnChain reports whether the stored position can be a position of the
+// chain the gateway serves. A height above the head is impossible, and a
+// stored hash that no longer matches a block far below the head is a foreign
+// chain rather than a reorg (those stay within reorg_depth of the head).
+func (s *Scanner) cursorOnChain(ctx context.Context, c *model.ChainCursor, head int64) (bool, error) {
+	if c.BlockNumber > head {
+		return false, nil
+	}
+	if c.BlockHash == "" || head-c.BlockNumber <= config.Cfg.Deposit.ReorgDepth {
+		return true, nil
+	}
+	block, err := s.gw.GetBlockByNum(ctx, c.BlockNumber)
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(block.BlockID, c.BlockHash), nil
 }
 
 // 保存数据库游标
 func saveCursor(ctx context.Context, c *model.ChainCursor) error {
 	return store.MyStore.DB.WithContext(ctx).Model(&model.ChainCursor{}).
-		Where("name = ?", cursorName).
+		Where("name = ?", c.Name).
 		UpdateColumns(map[string]any{
 			"block_number": c.BlockNumber,
 			"block_hash":   c.BlockHash,
@@ -162,11 +294,7 @@ func saveCursor(ctx context.Context, c *model.ChainCursor) error {
 }
 
 // scanBlock parses every Transfer log of one block in a single transaction.
-func (s *Scanner) scanBlock(ctx context.Context, block *chain.Block) error {
-	infos, err := s.gw.GetTxInfoByBlockNum(ctx, block.Number())
-	if err != nil {
-		return err
-	}
+func (s *Scanner) scanBlock(ctx context.Context, block *chain.Block, infos []chain.TxInfo) error {
 	blockTime := time.UnixMilli(block.Timestamp())
 	records := make([]model.DepositRecord, 0, 8)
 	for i := range infos {
@@ -419,7 +547,7 @@ func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.Cha
 	if forkPoint <= 0 || forkPoint < limit {
 		return nil, fmt.Errorf("reorg deeper than reorg_depth=%d, manual intervention required", config.Cfg.Deposit.ReorgDepth)
 	}
-	cursor := &model.ChainCursor{Name: cursorName, BlockNumber: forkPoint}
+	cursor := &model.ChainCursor{Name: cursorName(), BlockNumber: forkPoint}
 	err := store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.DepositRecord{}).
 			Where("block_number > ? AND status = ?", forkPoint, model.DepositStatePending).
@@ -433,7 +561,7 @@ func (s *Scanner) handleReorg(ctx context.Context, detectedAt int64) (*model.Cha
 		if err := tx.Where("block_number = ?", forkPoint).Take(&snap).Error; err == nil {
 			cursor.BlockHash = snap.BlockHash
 		}
-		return tx.Model(&model.ChainCursor{}).Where("name = ?", cursorName).
+		return tx.Model(&model.ChainCursor{}).Where("name = ?", cursor.Name).
 			UpdateColumns(map[string]any{
 				"block_number": cursor.BlockNumber,
 				"block_hash":   cursor.BlockHash,

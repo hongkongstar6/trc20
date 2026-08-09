@@ -217,6 +217,7 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 	if err != nil {
 		return fmt.Errorf("payload is not a json object: %w", err)
 	}
+
 	body, err := merchant.SignedPayload(payload, mch.Secret)
 	if err != nil {
 		return err

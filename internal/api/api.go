@@ -383,8 +383,7 @@ func (s *Server) listDeposits(c *gin.Context) {
 	}
 	limit := parseLimit(c, 200, 1000)
 	q := store.MyStore.DB.WithContext(c).Model(&model.DepositRecord{}).
-		Where("status = ? AND internal = ? AND confirmed_at BETWEEN ? AND ?",
-			model.DepositStateConfirmed, false, from, to)
+		Where("status = ? AND internal = ? AND confirmed_at BETWEEN ? AND ?", model.DepositStateConfirmed, false, from, to)
 	if merchantID := c.Query("merchant_id"); merchantID != "" {
 		q = q.Where("merchant_id = ?", merchantID)
 	}

@@ -177,6 +177,48 @@ type Block struct {
 	} `json:"transactions"`
 }
 
+type BlockDetail struct {
+	BlockID     string `json:"blockID"`
+	BlockHeader struct {
+		RawData struct {
+			Timestamp      int64  `json:"timestamp"`
+			TxTrieRoot     string `json:"txTrieRoot"`
+			ParentHash     string `json:"parentHash"`
+			Number         int    `json:"number"`
+			WitnessAddress string `json:"witness_address"`
+			Version        int    `json:"version"`
+		} `json:"raw_data"`
+		WitnessSignature string `json:"witness_signature"`
+	} `json:"block_header"`
+	Transactions []struct {
+		RawData struct {
+			RefBlockBytes string `json:"ref_block_bytes"`
+			RefBlockHash  string `json:"ref_block_hash"`
+			Expiration    int64  `json:"expiration"`
+			Contract      []struct {
+				Parameter struct {
+					Value struct {
+						OwnerAddress    string `json:"owner_address"`
+						Resource        string `json:"resource"`
+						Balance         int64  `json:"balance"`
+						ReceiverAddress string `json:"receiver_address"`
+					} `json:"value"`
+					TypeURL string `json:"type_url"`
+				} `json:"parameter"`
+				Type         string `json:"type"`
+				PermissionID int    `json:"Permission_id"`
+			} `json:"contract"`
+			Timestamp int64 `json:"timestamp"`
+		} `json:"raw_data"`
+		Signature []string `json:"signature"`
+		Ret       []struct {
+			ContractRet string `json:"contractRet"`
+		} `json:"ret"`
+		RawDataHex string `json:"raw_data_hex"`
+		TxID       string `json:"txID"`
+	} `json:"transactions"`
+}
+
 func (b *Block) Number() int64    { return b.BlockHeader.RawData.Number }
 func (b *Block) Timestamp() int64 { return b.BlockHeader.RawData.Timestamp }
 
@@ -204,8 +246,8 @@ func (g *Gateway) GetBlockByNum(ctx context.Context, num int64) (*Block, error) 
 
 // TxLog is one contract event log inside a transaction info entry.
 type TxLog struct {
-	Address string   `json:"address"` // hex, 41 prefixed
-	Topics  []string `json:"topics"`
+	Address string   `json:"address"` //抛出该事件的智能合约地址 hex, 41 prefixed
+	Topics  []string `json:"topics"`  //事件的签名 Hash（topics[0]）以及被 indexed 标记的参数
 	Data    string   `json:"data"`
 }
 

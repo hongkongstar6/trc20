@@ -34,12 +34,12 @@ type token struct {
 }
 
 type Scanner struct {
-	//cfg *config.Config
-	//st *store.Store
-	gw *chain.Gateway
-	//log     *logrus.Logger
+	gw      *chain.Gateway
 	tokens  map[string]token // contract (base58) -> token
 	minUnit *big.Int
+	//cfg *config.Config
+	//st *store.Store
+	//log     *logrus.Logger
 }
 
 func New(gw *chain.Gateway) *Scanner {
@@ -228,6 +228,7 @@ func (s *Scanner) decodeTransfer(lg chain.TxLog) (*transfer, bool) {
 	}
 	tk, ok := s.tokens[contract]
 	if !ok {
+		//只关心 USDT 的 Transfer 事件，其 address 都是固定的 USDT 合约地址(TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t)
 		return nil, false // contract allowlist
 	}
 	fromAddr, err := tron.HexToAddress(lg.Topics[1])

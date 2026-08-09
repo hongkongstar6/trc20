@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/tron"
@@ -270,5 +272,16 @@ func TestIsDuplicate(t *testing.T) {
 	}
 	if isDuplicate("SIGERROR", "validate signature error") {
 		t.Fatal("a signature error is not a duplicate")
+	}
+}
+
+func TestTruncateCutsOnRuneBoundary(t *testing.T) {
+	s := strings.Repeat("限", 100) // 3 bytes per rune, so 200 lands mid rune
+	got := truncate(s, 200)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated body is not valid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected ellipsis: %q", got)
 	}
 }

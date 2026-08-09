@@ -68,5 +68,21 @@ func fileWriter(dir, service string) io.Writer {
 		fmt.Fprintf(os.Stderr, "logx: cannot write to log dir %q: %v; logging to stdout only\n", dir, err)
 		return os.Stdout
 	}
-	return io.MultiWriter(os.Stdout, dw)
+	return &tee{file: dw, mirror: os.Stdout}
+}
+
+// tee writes every record to the log file and mirrors it to stdout. Unlike
+// io.MultiWriter it never lets the mirror decide the outcome: a closed or full
+// stdout (a detached `docker logs` consumer, for instance) would otherwise stop
+// the file from receiving the rest of the record and leave a half written line
+// behind.
+type tee struct {
+	file   io.Writer
+	mirror io.Writer
+}
+
+func (t *tee) Write(p []byte) (int, error) {
+	n, err := t.file.Write(p)
+	_, _ = t.mirror.Write(p)
+	return n, err
 }

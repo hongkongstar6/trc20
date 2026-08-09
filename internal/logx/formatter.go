@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sirupsen/logrus"
 )
@@ -41,9 +42,52 @@ func (f *formatter) Format(e *logrus.Entry) ([]byte, error) {
 	// writeFields(&b, e.Data)
 	// b.WriteByte('\n')
 	// 格式化日志信息
-	msg := fmt.Sprintf("%s [%-5s] [%s:%d] %s\n", timestamp, strings.ToUpper(e.Level.String()), file, line, e.Message)
+	msg := fmt.Sprintf("%s [%-5s] [%s:%d] %s\n", timestamp, strings.ToUpper(e.Level.String()), file, line, sanitize(e.Message))
 	b.WriteString(msg)
 	return b.Bytes(), nil
+}
+
+// sanitize keeps a record printable as text: node responses and chain error
+// payloads reach the message as raw bytes, and a single NUL or an invalid UTF-8
+// sequence makes an editor treat the whole log file as binary. Invalid bytes
+// become U+FFFD and control characters are escaped, so one record still is one
+// readable line.
+func sanitize(s string) string {
+	if isPlainText(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			b.WriteRune(utf8.RuneError)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	return b.String()
+}
+
+// isPlainText reports whether s can be written as is: valid UTF-8 without
+// control characters. Virtually every record takes this path.
+func isPlainText(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return utf8.ValidString(s)
 }
 
 // caller resolves the file and line to report, preferring the values injected by

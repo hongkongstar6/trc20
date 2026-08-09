@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/tron"
@@ -203,9 +204,15 @@ func (n *node) do(ctx context.Context, path string, payload []byte) ([]byte, err
 	return raw, nil
 }
 
+// truncate shortens a node response for logging. The cut is moved back to a
+// rune boundary: a body cut inside a multi byte character would put invalid
+// UTF-8 into the log file, which makes editors treat the file as binary.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "..."
 }

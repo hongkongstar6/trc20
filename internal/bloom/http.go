@@ -1,7 +1,10 @@
-package scanner
+package bloom
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -10,7 +13,6 @@ import (
 
 	//"github.com/hongkongstar6/trc20/internal/bloom"
 
-	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/config"
 )
 
@@ -50,9 +52,9 @@ func Serve(ctx context.Context) error {
 	return nil
 }
 func BloomState(c *gin.Context) {
-	bloom.AddrFilter.Mu.RLock()
-	f, maxID := bloom.AddrFilter.GetBloomFilter(), bloom.AddrFilter.GetMax()
-	bloom.AddrFilter.Mu.RUnlock()
+	AddrFilter.Mu.RLock()
+	f, maxID := AddrFilter.GetBloomFilter(), AddrFilter.GetMax()
+	AddrFilter.Mu.RUnlock()
 	c.JSON(http.StatusOK, gin.H{
 		"addresses": f.Count(), "capacity": f.Capacity(),
 		"bits": f.Bits(), "hashes": f.Hashes(),
@@ -66,7 +68,7 @@ func BloomAddAddress(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "bad token"})
 		return
 	}
-	var req bloom.AddressRequest
+	var req AddressRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -76,9 +78,44 @@ func BloomAddAddress(c *gin.Context) {
 		if a == "" {
 			continue
 		}
-		bloom.AddrFilter.Add(a)
+		AddrFilter.Add(a)
 		added++
 	}
-	logrus.Info("address pushed into bloom filter", ",added:", added, ",total:", bloom.AddrFilter.Count())
-	c.JSON(http.StatusOK, gin.H{"added": added, "total": bloom.AddrFilter.Count()})
+	logrus.Info("address pushed into bloom filter", ",added:", added, ",total:", AddrFilter.Count())
+	c.JSON(http.StatusOK, gin.H{"added": added, "total": AddrFilter.Count()})
+}
+
+// Notify pushes addresses to the scanner process. It is best effort on purpose:
+// the caller must not fail the allocation because the scanner is momentarily
+// down, the periodic Sync picks the address up in that case.
+func Notify(ctx context.Context, addresses ...string) error {
+	url := config.Cfg.Bloom.BloomNotifyURL
+
+	if url == "" || len(addresses) == 0 {
+		return nil
+	}
+	body, err := json.Marshal(AddressRequest{Addresses: addresses})
+	if err != nil {
+		return err
+	}
+	timeout := config.Duration(config.Cfg.Bloom.NotifyTimeout, 3*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if config.Cfg.Bloom.Token != "" {
+		req.Header.Set("X-Bloom-Token", config.Cfg.Bloom.Token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bloom notify: %s", resp.Status)
+	}
+	return nil
 }

@@ -1,11 +1,7 @@
 package bloom
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -215,39 +211,4 @@ func (r *Registry) GetBloomFilter() *BloomFilter {
 
 type AddressRequest struct {
 	Addresses []string `json:"addresses" binding:"required"`
-}
-
-// Notify pushes addresses to the scanner process. It is best effort on purpose:
-// the caller must not fail the allocation because the scanner is momentarily
-// down, the periodic Sync picks the address up in that case.
-func Notify(ctx context.Context, addresses ...string) error {
-	url := config.Cfg.Bloom.BloomNotifyURL
-
-	if url == "" || len(addresses) == 0 {
-		return nil
-	}
-	body, err := json.Marshal(AddressRequest{Addresses: addresses})
-	if err != nil {
-		return err
-	}
-	timeout := config.Duration(config.Cfg.Bloom.NotifyTimeout, 3*time.Second)
-	reqCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if config.Cfg.Bloom.Token != "" {
-		req.Header.Set("X-Bloom-Token", config.Cfg.Bloom.Token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bloom notify: %s", resp.Status)
-	}
-	return nil
 }

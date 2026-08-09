@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 
+	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/bootstrap"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/scanner"
@@ -26,7 +27,7 @@ func main() {
 	// The api process pushes every newly allocated address to this port, so a
 	// deposit to a brand new address is matched from the next block on.
 	go func() {
-		if err := scanner.Serve(ctx); err != nil {
+		if err := bloom.Serve(ctx); err != nil {
 			logrus.Error("bloom address sync server stopped", ",err:", err)
 		}
 	}()

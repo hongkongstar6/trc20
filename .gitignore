@@ -6,3 +6,5 @@ configs/config.mainnet*
 *.pem
 *.key
 *.crt
+log/
+etc/

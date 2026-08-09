@@ -271,7 +271,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	}
 	return &model.DepositRecord{
 		MerchantID:  wallet.MerchantID,
-		UID:         wallet.UID,
+		Account:     wallet.Account,
 		Chain:       "TRON",
 		Symbol:      t.token.symbol,
 		Contract:    t.contract,
@@ -360,7 +360,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 			"event_id":     depositEventID(rec),
 			"type":         "deposit",
 			"merchant_id":  rec.MerchantID,
-			"uid":          rec.UID,
+			"account":      rec.Account,
 			"chain":        rec.Chain,
 			"symbol":       rec.Symbol,
 			"contract":     rec.Contract,

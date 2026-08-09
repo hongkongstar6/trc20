@@ -95,7 +95,7 @@ func (WalletIndexAllocator) TableName() string { return "wallet_index_allocator"
 type DepositRecord struct {
 	ID            int64      `gorm:"primaryKey" json:"id"`
 	MerchantID    string     `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
-	UID           string     `gorm:"column:uid;index" json:"uid"`
+	Account       string     `gorm:"column:account;index" json:"account"`
 	Chain         string     `gorm:"size:16" json:"chain"`
 	Symbol        string     `gorm:"size:16" json:"symbol"`
 	Contract      string     `gorm:"size:64" json:"contract"`

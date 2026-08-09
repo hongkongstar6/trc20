@@ -68,6 +68,7 @@ func (d *Dispatcher) drainOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	for i := range rows {
 		d.deliver(ctx, &rows[i])
 	}

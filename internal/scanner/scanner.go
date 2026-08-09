@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
@@ -63,6 +64,9 @@ func New(gw *chain.Gateway) *Scanner {
 
 // Run scans forward continuously until ctx is cancelled.
 func (s *Scanner) Run(ctx context.Context) error {
+	// Addresses allocated by the api process are picked up by this poll, the
+	// api only extends its own copy of the filter.
+	go bloom.AddrFilter.RunSync(ctx)
 	interval := config.Duration(config.Cfg.Deposit.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -255,6 +259,11 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	if !ok {
 		return nil, false, nil
 	}
+	// The bloom filter answers "definitely not ours" for virtually every
+	// recipient on chain, so only the few possible hits reach MySQL.
+	if !bloom.AddrFilter.MayContain(t.to) {
+		return nil, false, nil
+	}
 	var wallet model.UserWallet
 	err := store.MyStore.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -290,6 +299,9 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 }
 
 func (s *Scanner) isInternal(ctx context.Context, from string) (bool, error) {
+	if !bloom.AddrFilter.MayContain(from) {
+		return false, nil
+	}
 	var count int64
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).Where("address = ?", from).Count(&count).Error; err != nil {
 		return false, err

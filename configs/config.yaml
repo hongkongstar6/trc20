@@ -96,6 +96,14 @@ deposit:
     reorg_depth: 60
     min_deposit_units: "10000" # 0.01 USDT dust filter
 
+# 专属地址布隆过滤器：进程内纯 Go 实现，启动时全量加载 user_wallet 地址。
+# 区块里的收款地址先过布隆，未命中直接丢弃，命中才回 mysql 查用户。
+bloom:
+    expected_addresses: 200000 # 按地址规模预留，超出后自动翻倍重建
+    false_positive_rate: 0.0001
+    sync_interval: 10s # 扫块进程多久拉一次其他进程新分配的地址
+    load_batch: 5000
+
 withdraw:
     enabled: true
     poll_interval: 3s

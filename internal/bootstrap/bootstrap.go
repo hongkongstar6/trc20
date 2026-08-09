@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/energy"
@@ -58,6 +59,13 @@ func Init(service string) (*App, error) {
 		}
 		logrus.Info("schema migrated")
 		//os.Exit(0)
+	}
+	// Every deposit address goes into the in-memory bloom filter before the
+	// service starts working, so block scanning never queries MySQL for the
+	// recipients that are not ours.
+	if _, err := bloom.Init(context.Background()); err != nil {
+		logrus.Error("address bloom filter init failed,", ",err:", err)
+		return nil, err
 	}
 	gw, err := chain.NewGateway(cfg.Chain)
 	if err != nil {

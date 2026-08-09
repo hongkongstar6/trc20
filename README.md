@@ -192,6 +192,29 @@ POST /v1/address  {"merchant_id":"m1","uid":"1001","sign":"<sha256>"}
 -> {"merchant_id":"m1","uid":"1001","account":"m1_1001","address":"T...","chain":"TRON"}
 ```
 
+## 专属地址匹配（布隆过滤器）
+
+区块里的收款地址不再逐个回 MySQL 查询：`internal/bloom` 是进程内纯 Go 实现的
+布隆过滤器（无 Redis、无第三方库），扫块时先用它过滤。
+
+- 未命中 = 一定不是我们的地址，直接丢弃，不产生任何数据库查询；
+- 命中 = 可能是某个专属地址，再按地址回 `user_wallet` 查出商户与账号。
+
+因此过滤器只会「误报」不会「漏报」：误报的代价是一次多余的查询，漏报会丢充值，
+而布隆过滤器结构上不可能漏报。
+
+生命周期：
+
+1. 进程启动（`bootstrap.Init`）时按 id 分页读取 `user_wallet` 全表，把所有专属
+   地址加入过滤器。2 万个地址在 `false_positive_rate: 0.0001` 下约占 48 KB 内存。
+2. `POST /v1/address` 分配新地址后立即 `Add` 进本进程的过滤器，下一个区块即可命中。
+3. api 与 scanner 是两个进程，所以 scanner 每 `bloom.sync_interval` 按
+   `id > max_id` 增量补齐其他进程新分配的地址。
+4. 地址数超过 `bloom.expected_addresses` 后，过滤器会以两倍容量从全表重建，
+   避免过载的过滤器把请求全部压回 MySQL。
+
+配置见 `configs/config.yaml` 的 `bloom` 段。
+
 ## 事件传递
 
 状态变更及其对应的发件箱行写入同一个数据库事务，因此

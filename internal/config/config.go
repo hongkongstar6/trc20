@@ -31,6 +31,21 @@ type Config struct {
 	Sweep    SweepConfig    `yaml:"sweep"`
 	Energy   EnergyConfig   `yaml:"energy"`
 	Notify   NotifyConfig   `yaml:"notify"`
+	Bloom    BloomConfig    `yaml:"bloom"`
+}
+
+// BloomConfig sizes the in-memory bloom filter holding every deposit address.
+// It is only a prefilter: a hit is always resolved against user_wallet, so a
+// false positive costs one query and a too small filter only costs throughput.
+type BloomConfig struct {
+	// ExpectedAddresses is the address count the filter is sized for. It is
+	// grown automatically (rebuild at twice the capacity) once exceeded.
+	ExpectedAddresses int64   `yaml:"expected_addresses"`
+	FalsePositiveRate float64 `yaml:"false_positive_rate"`
+	// SyncInterval is how often a process re-reads user_wallet for addresses
+	// allocated by another process (the api allocates, the scanner matches).
+	SyncInterval string `yaml:"sync_interval"`
+	LoadBatch    int    `yaml:"load_batch"`
 }
 
 type LogConfig struct {
@@ -409,6 +424,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Sweep.MaxPerRound <= 0 {
 		c.Sweep.MaxPerRound = 50
+	}
+	if c.Bloom.ExpectedAddresses <= 0 {
+		c.Bloom.ExpectedAddresses = 200000
+	}
+	if c.Bloom.FalsePositiveRate <= 0 || c.Bloom.FalsePositiveRate >= 1 {
+		c.Bloom.FalsePositiveRate = 0.0001
+	}
+	if c.Bloom.LoadBatch <= 0 {
+		c.Bloom.LoadBatch = 5000
 	}
 }
 

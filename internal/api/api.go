@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/hd"
 	"github.com/hongkongstar6/trc20/internal/merchant"
@@ -283,6 +284,9 @@ func (s *Server) createAddress(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// A deposit to a brand new address can land in the very next block, so the
+	// filter is extended as soon as the row is committed.
+	bloom.AddrFilter.Add(address)
 	c.JSON(http.StatusOK, gin.H{
 		"merchant_id": merchantID, "uid": uid, "account": account,
 		"address": address, "chain": "TRON",

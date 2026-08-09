@@ -57,6 +57,8 @@ chain:
       priority: 1
       enabled: true
       timeout: 10s
+      qps: 10
+      burst: 5
     - name: fullnode
       type: fullnode
       endpoint: "${FULLNODE_ENDPOINT:-http://127.0.0.1:8090}"

@@ -66,9 +66,12 @@ chain: #扫块配置节点
           priority: 2
           enabled: true
           timeout: 10s
+          qps: 10 # 免费 key 限速 15 次/秒，超过后整个 key 会被暂停几十秒
+          burst: 5
     solidity_for_confirm: true
     retry_per_node: 2
     broadcast_timeout: 15s
+    rate_limit_wait: 60s # 所有节点都被限流时，最多等待多久再报错
 
 wallet:
     account_path: "m/44'/195'/0'/0" #TRON的币种编号是195,第一个0:主账户第几个,第二个0:收款,第三个0:第几个子账户，m/44'/60'/0'/0/0

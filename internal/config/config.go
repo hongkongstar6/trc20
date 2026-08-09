@@ -111,6 +111,9 @@ type ChainConfig struct {
 	SolidityForConfirm bool   `yaml:"solidity_for_confirm"`
 	RetryPerNode       int    `yaml:"retry_per_node"`
 	BroadcastTimeout   string `yaml:"broadcast_timeout"`
+	// RateLimitWait caps how long one call waits for a throttled node to
+	// reopen before it reports a failure.
+	RateLimitWait string `yaml:"rate_limit_wait"`
 }
 
 type NodeConfig struct {
@@ -122,6 +125,14 @@ type NodeConfig struct {
 	Enabled  bool              `yaml:"enabled"`
 	Headers  map[string]string `yaml:"headers"`
 	Timeout  string            `yaml:"timeout"`
+	// QPS throttles outgoing requests to this node. TronGrid counts requests
+	// per API key and suspends the key for tens of seconds once the limit is
+	// exceeded, so pacing below it is faster than being suspended. 0 means the
+	// built in default for trongrid nodes and unlimited for a self hosted
+	// FullNode; a negative value disables throttling explicitly.
+	QPS float64 `yaml:"qps"`
+	// Burst is how many requests may be issued back to back before pacing.
+	Burst int `yaml:"burst"`
 }
 
 type TokenConfig struct {

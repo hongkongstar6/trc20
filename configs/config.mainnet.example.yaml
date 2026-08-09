@@ -51,9 +51,15 @@ chain:
       priority: 2
       enabled: true
       timeout: 10s
+      # A free TronGrid key allows 15 req/s and suspends the whole key for
+      # tens of seconds once that is exceeded, so requests are paced below it.
+      qps: 10
+      burst: 5
   solidity_for_confirm: true
   retry_per_node: 2
   broadcast_timeout: 15s
+  # How long a call may wait for a throttled node to reopen before failing.
+  rate_limit_wait: 60s
 
 wallet:
   account_path: "m/44'/195'/0'/0"

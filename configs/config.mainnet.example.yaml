@@ -12,7 +12,7 @@ network: mainnet
 log:
   level: info
 
-api:
+api_server:
   listen: ":8080"
   hmac_secret: "${API_HMAC_SECRET}"
   # Mainnet must pin the business system egress IPs.
@@ -21,7 +21,7 @@ api:
   signature_skew: 5m
   nonce_ttl: 10m
 
-sign:
+sign_server:
   listen: ":8090"
   endpoint: "${SIGN_ENDPOINT}"
   token: "${SIGN_TOKEN}"

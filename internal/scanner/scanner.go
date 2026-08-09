@@ -69,6 +69,14 @@ func New(gw *chain.Gateway) *Scanner {
 	if _, ok := minUnit.SetString(config.Cfg.Deposit.MinDepositUnits, 10); !ok {
 		minUnit = big.NewInt(0)
 	}
+	// The allowlist decides which logs can be a deposit at all, so an empty or
+	// unexpected one has to be visible in the log of every scanner start.
+	contracts := make([]string, 0, len(tokens))
+	for c, t := range tokens {
+		contracts = append(contracts, t.symbol+"="+c)
+	}
+	logrus.Info("token allowlist loaded,contracts:", strings.Join(contracts, ","),
+		",min_deposit_units:", minUnit.String())
 	return &Scanner{
 		gw:      gw,
 		tokens:  tokens,
@@ -89,12 +97,11 @@ func (s *Scanner) Run(ctx context.Context) error {
 	for {
 		behind, err := s.tick(ctx)
 		if err != nil {
-			logrus.Error("tick,err:", err.Error())
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			// A node outage must stall the cursor, never skip blocks.
-			logrus.Error("scan tick failed", ",err:", err)
+			logrus.Error("scan tick failed,err:", err)
 		}
 		if err == nil && behind {
 			// Still lagging: keep scanning instead of idling for a whole
@@ -142,33 +149,28 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 	for i := range fetched {
 		num := from + int64(i)
 		if fetched[i].err != nil {
-			logrus.Info("当前区块读取失败：", cursor.BlockNumber, "err:", err)
 			return false, fmt.Errorf("block %d: %w", num, fetched[i].err)
 		}
-		logrus.Info("当前区块读取成功：", cursor.BlockNumber)
+		logrus.Debug("当前区块读取成功：", num)
 
 		block := fetched[i].block
 		if cursor.BlockHash != "" && block.BlockHeader.RawData.ParentHash != "" &&
 			!strings.EqualFold(block.BlockHeader.RawData.ParentHash, cursor.BlockHash) {
-			logrus.Warn("reorg detected", "block", num, "parent", block.BlockHeader.RawData.ParentHash, "cursor_hash", cursor.BlockHash)
+			logrus.Warn("reorg detected,block:", num, ",parent:", block.BlockHeader.RawData.ParentHash, ",cursor_hash:", cursor.BlockHash)
 			newCursor, err := s.handleReorg(ctx, num)
 			if err != nil {
-				logrus.Info("当前区块读取失败：", cursor.BlockNumber, "err:", err)
 				return false, fmt.Errorf("reorg: %w", err)
 			}
 			cursor = newCursor
-			logrus.Info("当前区块读取失败：", cursor.BlockNumber, "err:", err)
 			return true, nil // restart from the rolled back cursor
 		}
 		//扫描区块数据，提取出转账事件，写入数据库
 		if err := s.scanBlock(ctx, block, fetched[i].infos); err != nil {
-			logrus.Info("当前区块读取失败：", cursor.BlockNumber, "err:", err)
 			return false, fmt.Errorf("scan block %d: %w", num, err)
 		}
 		cursor.BlockNumber = block.Number()
 		cursor.BlockHash = block.BlockID
 		if err := saveCursor(ctx, cursor); err != nil {
-			logrus.Info("当前区块读取失败：", cursor.BlockNumber, "err:", err)
 			return false, err
 		}
 	}
@@ -292,7 +294,7 @@ func (s *Scanner) cursorOnChain(ctx context.Context, c *model.ChainCursor, head 
 
 // 保存数据库游标
 func saveCursor(ctx context.Context, c *model.ChainCursor) error {
-	logrus.Info("更新区块2：", c.BlockNumber)
+	logrus.Debug("更新游标区块：", c.BlockNumber)
 	return store.MyStore.DB.WithContext(ctx).Model(&model.ChainCursor{}).
 		Where("name = ?", c.Name).
 		UpdateColumns(map[string]any{
@@ -397,22 +399,12 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	if !ok {
 		return nil, false, nil
 	}
-	switch t.to {
-	case "TBLsy8bdiUFjK1ihE7q3qTSAghvMHfFBPZ",
-		"TAT3M8mQBDd8NHrAaoPbznpcNL52PfC8S1",
-		"THxswgba4LqY5unsUQYwekdKTd1wEUvgB6",
-		"TWtf7FRwNpFGPN7Bt287UkVvKadaESqwxK",
-		"TH3WrXhtTRExX3kUjF1aLH1hYxWVBwaYcV":
-		logrus.Info("第一次找到了", t.to)
-	}
-
 	// The bloom filter answers "definitely not ours" for virtually every
 	// recipient on chain, so only the few possible hits reach MySQL.
 	if !bloom.AddrFilter.MayContain(t.to) {
-		logrus.Error("地址匹配失败", t.to)
+		logrus.Debug("地址不属于本系统：", t.to)
 		return nil, false, nil
 	}
-	logrus.Info("地址匹配成功1", t.to)
 
 	var wallet model.UserWallet
 	err := store.MyStore.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
@@ -422,6 +414,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	if err != nil {
 		return nil, false, err
 	}
+	logrus.Info("地址匹配成功,address:", t.to, ",txid:", info.ID, ",amount:", t.amount.String())
 	// Internal movement (sweep, hot wallet refill) is recorded but flagged so
 	// the business system never credits it as a user deposit.
 	internal, err := s.isInternal(ctx, t.from)

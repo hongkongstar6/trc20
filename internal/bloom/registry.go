@@ -23,9 +23,17 @@ type Registry struct {
 	Mu     sync.RWMutex
 	filter *BloomFilter
 	maxID  int64
+	// syncedAt is when the last sync started. Rows updated at or after it are
+	// re-read, because an address written by an UPDATE keeps its id.
+	syncedAt time.Time
 
 	pageSize int
 }
+
+// updateSkew widens the updated_at window of every sync, so a row committed
+// while the previous sync was running, or written with a slightly lagging
+// database clock, is still picked up.
+const updateSkew = time.Minute
 
 func GetNew(expected uint64, fpRate float64) *Registry {
 	return &Registry{filter: NewBloomFilter(expected, fpRate)}
@@ -37,6 +45,7 @@ func Init(ctx context.Context) (*Registry, error) {
 		filter:   NewBloomFilter(uint64(config.Cfg.Bloom.ExpectedAddresses), config.Cfg.Bloom.FalsePositiveRate),
 		pageSize: config.Cfg.Bloom.LoadBatch,
 	}
+	r.syncedAt = time.Now()
 	if err := r.reload(ctx, r.filter); err != nil {
 		return nil, err
 	}
@@ -97,6 +106,7 @@ func (r *Registry) Sync(ctx context.Context) error {
 	if overloaded {
 		return r.rebuild(ctx, capacity*2)
 	}
+	startedAt := time.Now()
 	for {
 		r.Mu.RLock()
 		after := r.maxID
@@ -106,7 +116,7 @@ func (r *Registry) Sync(ctx context.Context) error {
 			return err
 		}
 		if len(rows) == 0 {
-			return nil
+			break
 		}
 		r.Mu.Lock()
 		for i := range rows {
@@ -117,9 +127,44 @@ func (r *Registry) Sync(ctx context.Context) error {
 		}
 		r.Mu.Unlock()
 		if len(rows) < r.batch() {
-			return nil
+			break
 		}
 	}
+	return r.syncUpdated(ctx, startedAt)
+}
+
+// syncUpdated loads the rows changed since the previous sync. A bloom filter
+// only ever gains bits, so re-adding an address that is already in it is
+// harmless; missing one means every deposit to it is ignored.
+func (r *Registry) syncUpdated(ctx context.Context, startedAt time.Time) error {
+	r.Mu.RLock()
+	since := r.syncedAt
+	r.Mu.RUnlock()
+	if since.IsZero() {
+		since = startedAt
+	}
+	rows, err := store.UserWalletAddressesUpdatedSince(ctx, since.Add(-updateSkew), r.batch())
+	if err != nil {
+		return err
+	}
+	r.Mu.RLock()
+	filter := r.filter
+	r.Mu.RUnlock()
+	if len(rows) >= r.batch() {
+		// More updates than one page: reading the whole table into the current
+		// filter is bounded and cannot leave a gap behind.
+		if _, err := r.load(ctx, filter); err != nil {
+			return err
+		}
+	} else {
+		for i := range rows {
+			filter.Add(rows[i].Address)
+		}
+	}
+	r.Mu.Lock()
+	r.syncedAt = startedAt
+	r.Mu.Unlock()
+	return nil
 }
 
 // RunSync keeps the filter in sync until ctx is cancelled.
@@ -155,6 +200,7 @@ func (r *Registry) rebuild(ctx context.Context, capacity uint64) error {
 	r.Mu.Lock()
 	r.filter = fresh
 	r.maxID = maxID
+	r.syncedAt = time.Now()
 	r.Mu.Unlock()
 	logrus.Info("address bloom filter rebuilt",
 		",addresses:", fresh.Count(), ",capacity:", fresh.Capacity())

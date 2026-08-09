@@ -12,19 +12,19 @@ network: nile
 log:
   level: info
 
-mysql:
+mysql_server:
   dsn: "${MYSQL_DSN:-wallet:wallet@tcp(127.0.0.1:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local}"
   max_open_conns: 50
   max_idle_conns: 10
   conn_max_lifetime: 30m
 
-redis:
+redis_server:
   addr: "${REDIS_ADDR:-127.0.0.1:6379}"
   password: "${REDIS_PASSWORD:-}"
   db: 0
   prefix: "wallet:nile"
 
-api:
+api_server:
   listen: ":8080"
   hmac_secret: "${API_HMAC_SECRET}"
   allowed_ips: []          # empty means no IP restriction; set it in production
@@ -32,7 +32,7 @@ api:
   nonce_ttl: 10m
   max_body_bytes: 1048576
 
-sign:
+sign_server:
   # cmd/sign listens here; every other service calls it through `endpoint`.
   listen: ":8090"
   endpoint: "${SIGN_ENDPOINT:-http://127.0.0.1:8090}"
@@ -98,7 +98,7 @@ deposit:
   min_deposit_units: "10000"   # 0.01 USDT dust filter
 
 # 专属地址布隆过滤器：进程内纯 Go 实现，启动时全量加载 user_wallet 地址。
-bloom:
+scanner_server:
   expected_addresses: 200000    # 超出容量后自动翻倍重建
   false_positive_rate: 0.0001
   listen: "${BLOOM_LISTEN:-:8091}"   # scanner 的地址同步端口
@@ -108,7 +108,7 @@ bloom:
   sync_interval: 10s            # 推送失败/scanner 重启的兜底：按 id 增量补齐
   load_batch: 5000
 
-withdraw:
+withdraw_server:
   enabled: true
   poll_interval: 3s
   fee_limit_sun: 40000000   # 40 TRX ceiling, only spent when energy is short
@@ -118,7 +118,7 @@ withdraw:
   confirm_blocks: 19
   address_blacklist: []
 
-sweep:
+sweep_server:
   enabled: true
   interval: 5m
   fee_limit_sun: 40000000

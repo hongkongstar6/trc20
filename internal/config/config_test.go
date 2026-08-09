@@ -8,8 +8,23 @@ import (
 	"time"
 )
 
+// usdtTokens is the token allowlist every config needs to pass validation. It
+// is appended to a fixture that does not carry a wallet section of its own, so
+// the fixtures stay focused on what they actually assert.
+const usdtTokens = `
+wallet:
+  tokens:
+    - symbol: USDT
+      contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+      decimals: 6
+      enabled: true
+`
+
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
+	if !strings.Contains(body, "\nwallet:") {
+		body += usdtTokens
+	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -18,7 +33,7 @@ func writeConfig(t *testing.T, body string) string {
 }
 
 const minimalConfig = `
-mysql:
+mysql_server:
   dsn: "user:pass@tcp(127.0.0.1:3306)/wallet"
 chain:
   nodes:
@@ -56,12 +71,66 @@ func TestLoadAppliesSafeDefaults(t *testing.T) {
 	}
 }
 
+// The tokens allowlist decides which contract logs can be a deposit at all: an
+// empty one makes the scanner drop every transfer on chain without any error,
+// so a config section that no struct field maps to must fail at startup.
+func TestLoadRejectsUnknownSection(t *testing.T) {
+	_, err := Load(writeConfig(t, minimalConfig+`
+wallet_server:
+  tokens:
+    - symbol: USDT
+      contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+      decimals: 6
+      enabled: true
+`))
+	if err == nil || !strings.Contains(err.Error(), "unknown section") {
+		t.Fatalf("error = %v, want an unknown section error", err)
+	}
+}
+
+func TestValidateRequiresAnEnabledToken(t *testing.T) {
+	_, err := Load(writeConfig(t, minimalConfig+`
+wallet:
+  tokens:
+    - symbol: USDT
+      contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+      decimals: 6
+      enabled: false
+`))
+	if err == nil {
+		t.Fatal("a config without an enabled token must be rejected: the scanner would match nothing")
+	}
+}
+
+// Every shipped config must produce the USDT allowlist the scanner matches on.
+func TestCommittedConfigsCarryTheUSDTAllowlist(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "user:pass@tcp(127.0.0.1:3306)/wallet")
+	for _, name := range []string{"config.yaml", "config.nile.yaml"} {
+		cfg, err := Load(filepath.Join("..", "..", "configs", name))
+		if err != nil {
+			t.Fatalf("Load %s: %v", name, err)
+		}
+		var usdt *TokenConfig
+		for i := range cfg.Wallet.Tokens {
+			if cfg.Wallet.Tokens[i].Enabled && cfg.Wallet.Tokens[i].Symbol == "USDT" {
+				usdt = &cfg.Wallet.Tokens[i]
+			}
+		}
+		if usdt == nil {
+			t.Fatalf("%s: no enabled USDT token, the scanner would ignore every transfer", name)
+		}
+		if usdt.Decimals != 6 {
+			t.Fatalf("%s: USDT decimals = %d, want 6", name, usdt.Decimals)
+		}
+	}
+}
+
 func TestLoadExpandsEnvReferences(t *testing.T) {
 	t.Setenv("TEST_WALLET_DSN", "secret-dsn")
 	cfg, err := Load(writeConfig(t, `
-mysql:
+mysql_server:
   dsn: "${TEST_WALLET_DSN}"
-redis:
+redis_server:
   addr: "${TEST_UNSET_REDIS:-127.0.0.1:6379}"
 chain:
   nodes:
@@ -84,7 +153,7 @@ chain:
 // validation, rather than leaving the literal "${VAR}" in a connection string.
 func TestLoadUnsetEnvBecomesEmpty(t *testing.T) {
 	_, err := Load(writeConfig(t, `
-mysql:
+mysql_server:
   dsn: "${TEST_DEFINITELY_UNSET_DSN}"
 chain:
   nodes:
@@ -102,7 +171,7 @@ chain:
 func TestLoadEmptyEnvFallsBackToDefault(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "")
 	cfg, err := Load(writeConfig(t, `
-mysql:
+mysql_server:
   dsn: "${MYSQL_DSN:-user:pass@tcp(127.0.0.1:3306)/wallet}"
 chain:
   nodes:
@@ -119,7 +188,7 @@ chain:
 
 func TestValidateRequiresAnEnabledNode(t *testing.T) {
 	_, err := Load(writeConfig(t, `
-mysql:
+mysql_server:
   dsn: "dsn"
 chain:
   nodes:
@@ -171,7 +240,7 @@ energy:
 
 func TestNodePriorityAndPeriodsSurvive(t *testing.T) {
 	cfg, err := Load(writeConfig(t, `
-mysql:
+mysql_server:
   dsn: "dsn"
 chain:
   nodes:
@@ -240,7 +309,7 @@ func TestLoadEnvValueWithYAMLMetacharacters(t *testing.T) {
 	t.Setenv("TEST_WALLET_DSN", "user:p\"a#ss\nword@tcp(127.0.0.1:3306)/wallet")
 	t.Setenv("TEST_NODE_ENDPOINT", "http://node:8090 # not a comment")
 	cfg, err := Load(writeConfig(t, `
-mysql:
+mysql_server:
   dsn: "${TEST_WALLET_DSN}"
 chain:
   nodes:
@@ -265,9 +334,9 @@ func TestLoadPlainEnvReferenceKeepsType(t *testing.T) {
 	t.Setenv("TEST_REDIS_DB", "3")
 	t.Setenv("TEST_NODE_ENABLED", "true")
 	cfg, err := Load(writeConfig(t, `
-mysql:
+mysql_server:
   dsn: "dsn"
-redis:
+redis_server:
   db: ${TEST_REDIS_DB}
 chain:
   nodes:

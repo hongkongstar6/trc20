@@ -7,7 +7,7 @@ import (
 )
 
 func TestFilterNeverMissesAnAddedAddress(t *testing.T) {
-	f := New(20000, 0.0001)
+	f := NewBloomFilter(20000, 0.0001)
 	addrs := make([]string, 20000)
 	for i := range addrs {
 		addrs[i] = fmt.Sprintf("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgj%05d", i)
@@ -27,7 +27,7 @@ func TestFilterNeverMissesAnAddedAddress(t *testing.T) {
 
 func TestFilterRejectsUnknownAddressesAtTheConfiguredRate(t *testing.T) {
 	const n = 20000
-	f := New(n, 0.0001)
+	f := NewBloomFilter(n, 0.0001)
 	for i := 0; i < n; i++ {
 		f.Add(fmt.Sprintf("known-%05d", i))
 	}
@@ -46,14 +46,14 @@ func TestFilterRejectsUnknownAddressesAtTheConfiguredRate(t *testing.T) {
 }
 
 func TestFilterEmptyKeyIsNeverAMatch(t *testing.T) {
-	f := New(10, 0.01)
+	f := NewBloomFilter(10, 0.01)
 	if f.MayContain("") {
 		t.Fatal("an empty address must not match")
 	}
 }
 
 func TestNilFilterFallsBackToTheDatabase(t *testing.T) {
-	var f *Filter
+	var f *BloomFilter
 	f.Add("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t")
 	if !f.MayContain("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t") {
 		t.Fatal("an uninitialised filter must answer true so the caller queries mysql")
@@ -72,7 +72,7 @@ func TestEstimateSizesTheFilter(t *testing.T) {
 }
 
 func TestFilterIsSafeForConcurrentUse(t *testing.T) {
-	f := New(1000, 0.001)
+	f := NewBloomFilter(1000, 0.001)
 	var wg sync.WaitGroup
 	for w := 0; w < 8; w++ {
 		wg.Add(1)

@@ -1,7 +1,11 @@
 package bloom
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -20,17 +24,21 @@ var AddrFilter *Registry
 // the table by id so a scanner process also learns about addresses allocated by
 // the api process.
 type Registry struct {
-	mu     sync.RWMutex
+	Mu     sync.RWMutex
 	filter *BloomFilter
 	maxID  int64
 
 	pageSize int
 }
 
+func GetNew(expected uint64, fpRate float64) *Registry {
+	return &Registry{filter: NewBloomFilter(expected, fpRate)}
+}
+
 // Init builds the filter and loads every user_wallet address into it.
 func Init(ctx context.Context) (*Registry, error) {
 	r := &Registry{
-		filter:   New(uint64(config.Cfg.Bloom.ExpectedAddresses), config.Cfg.Bloom.FalsePositiveRate),
+		filter:   NewBloomFilter(uint64(config.Cfg.Bloom.ExpectedAddresses), config.Cfg.Bloom.FalsePositiveRate),
 		pageSize: config.Cfg.Bloom.LoadBatch,
 	}
 	if err := r.reload(ctx, r.filter); err != nil {
@@ -52,9 +60,9 @@ func (r *Registry) Add(address string) {
 	if r == nil || address == "" {
 		return
 	}
-	r.mu.Lock()
+	r.Mu.Lock()
 	r.filter.Add(address)
-	r.mu.Unlock()
+	r.Mu.Unlock()
 }
 
 // MayContain is false only when the address is certainly unknown, which is the
@@ -63,9 +71,9 @@ func (r *Registry) MayContain(address string) bool {
 	if r == nil {
 		return true
 	}
-	r.mu.RLock()
+	r.Mu.RLock()
 	f := r.filter
-	r.mu.RUnlock()
+	r.Mu.RUnlock()
 	return f.MayContain(address)
 }
 
@@ -73,8 +81,8 @@ func (r *Registry) Count() uint64 {
 	if r == nil {
 		return 0
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.Mu.RLock()
+	defer r.Mu.RUnlock()
 	return r.filter.Count()
 }
 
@@ -86,17 +94,17 @@ func (r *Registry) Sync(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
-	r.mu.RLock()
+	r.Mu.RLock()
 	overloaded := r.filter.Count() > r.filter.Capacity()
 	capacity := r.filter.Capacity()
-	r.mu.RUnlock()
+	r.Mu.RUnlock()
 	if overloaded {
 		return r.rebuild(ctx, capacity*2)
 	}
 	for {
-		r.mu.RLock()
+		r.Mu.RLock()
 		after := r.maxID
-		r.mu.RUnlock()
+		r.Mu.RUnlock()
 		rows, err := store.UserWalletAddressesAfter(ctx, after, r.batch())
 		if err != nil {
 			return err
@@ -104,14 +112,14 @@ func (r *Registry) Sync(ctx context.Context) error {
 		if len(rows) == 0 {
 			return nil
 		}
-		r.mu.Lock()
+		r.Mu.Lock()
 		for i := range rows {
 			r.filter.Add(rows[i].Address)
 			if rows[i].ID > r.maxID {
 				r.maxID = rows[i].ID
 			}
 		}
-		r.mu.Unlock()
+		r.Mu.Unlock()
 		if len(rows) < r.batch() {
 			return nil
 		}
@@ -143,15 +151,15 @@ func (r *Registry) RunSync(ctx context.Context) {
 // rebuild loads the whole table into a new filter and swaps it in, so lookups
 // never observe a partially filled filter.
 func (r *Registry) rebuild(ctx context.Context, capacity uint64) error {
-	fresh := New(capacity, config.Cfg.Bloom.FalsePositiveRate)
+	fresh := NewBloomFilter(capacity, config.Cfg.Bloom.FalsePositiveRate)
 	maxID, err := r.load(ctx, fresh)
 	if err != nil {
 		return err
 	}
-	r.mu.Lock()
+	r.Mu.Lock()
 	r.filter = fresh
 	r.maxID = maxID
-	r.mu.Unlock()
+	r.Mu.Unlock()
 	logrus.Info("address bloom filter rebuilt",
 		",addresses:", fresh.Count(), ",capacity:", fresh.Capacity())
 	return nil
@@ -190,4 +198,56 @@ func (r *Registry) batch() int {
 		return 5000
 	}
 	return r.pageSize
+}
+func (r *Registry) GetMax() int64 {
+	return r.maxID
+}
+
+//	func (r *Registry) GetRWMutex() sync.RWMutex {
+//		return r.mu
+//	}
+func (r *Registry) GetPageSize() int {
+	return r.pageSize
+}
+func (r *Registry) GetBloomFilter() *BloomFilter {
+	return r.filter
+}
+
+type AddressRequest struct {
+	Addresses []string `json:"addresses" binding:"required"`
+}
+
+// Notify pushes addresses to the scanner process. It is best effort on purpose:
+// the caller must not fail the allocation because the scanner is momentarily
+// down, the periodic Sync picks the address up in that case.
+func Notify(ctx context.Context, addresses ...string) error {
+	url := config.Cfg.Bloom.BloomNotifyURL
+
+	if url == "" || len(addresses) == 0 {
+		return nil
+	}
+	body, err := json.Marshal(AddressRequest{Addresses: addresses})
+	if err != nil {
+		return err
+	}
+	timeout := config.Duration(config.Cfg.Bloom.NotifyTimeout, 3*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if config.Cfg.Bloom.Token != "" {
+		req.Header.Set("X-Bloom-Token", config.Cfg.Bloom.Token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bloom notify: %s", resp.Status)
+	}
+	return nil
 }

@@ -26,7 +26,7 @@ type BloomFilter struct {
 }
 
 // New sizes a filter for expected keys at the target false positive rate.
-func New(expected uint64, fpRate float64) *BloomFilter {
+func NewBloomFilter(expected uint64, fpRate float64) *BloomFilter {
 	if expected == 0 {
 		expected = 1
 	}

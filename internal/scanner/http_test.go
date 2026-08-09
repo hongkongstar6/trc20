@@ -1,4 +1,4 @@
-package bloom
+package scanner
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/config"
 )
 
@@ -21,15 +22,15 @@ func TestNotifyAddsTheAddressToTheServedFilter(t *testing.T) {
 		ExpectedAddresses: 1000,
 		FalsePositiveRate: 0.0001,
 		Listen:            addr,
-		NotifyURL:         "http://" + addr + addressPath,
+		BloomNotifyURL:    "http://" + addr + addressPath,
 		Token:             "t0ken",
 		NotifyTimeout:     "3s",
 	}
-	r := &Registry{filter: New(1000, 0.0001)}
+	r := bloom.GetNew(1000, 0.0001) // &bloom.Registry{filter: bloom.NewBloomFilter(1000, 0.0001)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
-		if err := r.Serve(ctx); err != nil {
+		if err := Serve(ctx); err != nil {
 			t.Error("serve:", err)
 		}
 	}()
@@ -39,7 +40,7 @@ func TestNotifyAddsTheAddressToTheServedFilter(t *testing.T) {
 	if r.MayContain(address) {
 		t.Fatal("the address must be unknown before the push")
 	}
-	if err := Notify(ctx, address); err != nil {
+	if err := bloom.Notify(ctx, address); err != nil {
 		t.Fatalf("notify: %v", err)
 	}
 	if !r.MayContain(address) {
@@ -48,14 +49,14 @@ func TestNotifyAddsTheAddressToTheServedFilter(t *testing.T) {
 
 	// A wrong token must not be able to poison the filter.
 	config.Cfg.Bloom.Token = "wrong"
-	if err := Notify(ctx, "TVjsyZ7fYF3qLF6BQgPmTEZy1xrNNyVAAA"); err == nil {
+	if err := bloom.Notify(ctx, "TVjsyZ7fYF3qLF6BQgPmTEZy1xrNNyVAAA"); err == nil {
 		t.Fatal("a push with a bad token must be rejected")
 	}
 }
 
 func TestNotifyIsANoOpWithoutURL(t *testing.T) {
 	config.Cfg = &config.Config{}
-	if err := Notify(context.Background(), "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"); err != nil {
+	if err := bloom.Notify(context.Background(), "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"); err != nil {
 		t.Fatalf("notify without notify_url must be a no-op, got %v", err)
 	}
 }

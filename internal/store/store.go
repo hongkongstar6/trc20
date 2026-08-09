@@ -30,7 +30,9 @@ type Store struct {
 var MyStore *Store
 
 func Open() (*Store, error) {
-	gdb, err := gorm.Open(mysql.Open(config.Cfg.MySQL.DSN), &gorm.Config{
+	a := mysql.Open(config.Cfg.MySQL.DSN)
+
+	gdb, err := gorm.Open(a, &gorm.Config{
 		// "record not found" is an expected outcome for most lookups here, so
 		// it must not drown out the warnings that matter.
 		Logger: logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{

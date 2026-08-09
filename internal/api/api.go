@@ -285,8 +285,13 @@ func (s *Server) createAddress(c *gin.Context) {
 		return
 	}
 	// A deposit to a brand new address can land in the very next block, so the
-	// filter is extended as soon as the row is committed.
+	// filter is extended as soon as the row is committed and the address is
+	// pushed to the scanner process. A failed push is not an allocation error:
+	// the scanner also syncs new rows from user_wallet periodically.
 	bloom.AddrFilter.Add(address)
+	if err := bloom.Notify(c, address); err != nil {
+		logrus.Error("push address to scanner failed", ",address:", address, ",err:", err)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"merchant_id": merchantID, "uid": uid, "account": account,
 		"address": address, "chain": "TRON",

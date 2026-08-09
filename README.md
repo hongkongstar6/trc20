@@ -207,11 +207,20 @@ POST /v1/address  {"merchant_id":"m1","uid":"1001","sign":"<sha256>"}
 
 1. 进程启动（`bootstrap.Init`）时按 id 分页读取 `user_wallet` 全表，把所有专属
    地址加入过滤器。2 万个地址在 `false_positive_rate: 0.0001` 下约占 48 KB 内存。
-2. `POST /v1/address` 分配新地址后立即 `Add` 进本进程的过滤器，下一个区块即可命中。
-3. api 与 scanner 是两个进程，所以 scanner 每 `bloom.sync_interval` 按
-   `id > max_id` 增量补齐其他进程新分配的地址。
+2. `POST /v1/address` 分配新地址后，api 先加进自己的过滤器，再 POST 推送给
+   scanner（api 与 scanner 是两个进程），scanner 收到即刻加入，下一个区块就能命中。
+3. 兜底：推送失败或 scanner 重启时，scanner 每 `bloom.sync_interval` 按
+   `id > max_id` 从 `user_wallet` 增量补齐，所以一次推送失败不会丢地址，
+   api 也不会因为 scanner 短暂不可用而分配失败。
 4. 地址数超过 `bloom.expected_addresses` 后，过滤器会以两倍容量从全表重建，
    避免过载的过滤器把请求全部压回 MySQL。
+
+scanner 的地址同步端口（`bloom.listen`，compose 里是 `:8091`，只在内网可达）：
+
+```bash
+POST /internal/bloom/address  {"addresses":["T..."]}   # 头 X-Bloom-Token: <bloom.token>
+GET  /internal/bloom/stats    # 地址数、容量、bit 数、hash 数、当前误报率、max_id
+```
 
 配置见 `configs/config.yaml` 的 `bloom` 段。
 

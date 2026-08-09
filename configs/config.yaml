@@ -101,7 +101,11 @@ deposit:
 bloom:
     expected_addresses: 200000 # 按地址规模预留，超出后自动翻倍重建
     false_positive_rate: 0.0001
-    sync_interval: 10s # 扫块进程多久拉一次其他进程新分配的地址
+    listen: "${BLOOM_LISTEN:-:8091}" # scanner 的地址同步端口
+    notify_url: "${BLOOM_NOTIFY_URL:-http://127.0.0.1:8091/internal/bloom/address}" # api 分配地址后推送给 scanner
+    token: "${BLOOM_TOKEN:-}"
+    notify_timeout: 3s
+    sync_interval: 10s # 推送失败/scanner 重启的兜底：按 id 增量补齐
     load_batch: 5000
 
 withdraw:

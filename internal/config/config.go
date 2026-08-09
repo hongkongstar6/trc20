@@ -42,8 +42,15 @@ type BloomConfig struct {
 	// grown automatically (rebuild at twice the capacity) once exceeded.
 	ExpectedAddresses int64   `yaml:"expected_addresses"`
 	FalsePositiveRate float64 `yaml:"false_positive_rate"`
-	// SyncInterval is how often a process re-reads user_wallet for addresses
-	// allocated by another process (the api allocates, the scanner matches).
+	// Listen is the address sync port of the scanner process; NotifyURL is the
+	// same endpoint as seen by the api process, which pushes every freshly
+	// allocated address to it. Token authenticates that push.
+	Listen        string `yaml:"listen"`
+	NotifyURL     string `yaml:"notify_url"`
+	Token         string `yaml:"token"`
+	NotifyTimeout string `yaml:"notify_timeout"`
+	// SyncInterval is the fallback for a push that did not arrive (scanner
+	// restart, network blip): the process re-reads user_wallet by id.
 	SyncInterval string `yaml:"sync_interval"`
 	LoadBatch    int    `yaml:"load_batch"`
 }

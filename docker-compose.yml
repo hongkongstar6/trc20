@@ -74,6 +74,11 @@ services:
       GAS_ACCOUNT_ADDRESS: ${GAS_ACCOUNT_ADDRESS}
       TRONGRID_API_KEY: ${TRONGRID_API_KEY:-}
       ROCKETMQ_NAMESRV: rocketmq-namesrv:9876
+      # 布隆过滤器地址同步：scanner 监听 8091，api 分配地址后推送给它。
+      # 端口不对宿主机发布，只在 wallet 网络内部可达。
+      BLOOM_LISTEN: ":8091"
+      BLOOM_NOTIFY_URL: http://scanner:8091/internal/bloom/address
+      BLOOM_TOKEN: ${BLOOM_TOKEN:-}
     depends_on:   #启动sign服务前，确保mysql服务已经启动并且健康
       mysql: {condition: service_healthy} #等待 mysql 通过健康检查
     volumes:

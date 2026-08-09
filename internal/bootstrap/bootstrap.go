@@ -60,12 +60,14 @@ func Init(service string) (*App, error) {
 		logrus.Info("schema migrated")
 		//os.Exit(0)
 	}
-	// Every deposit address goes into the in-memory bloom filter before the
-	// service starts working, so block scanning never queries MySQL for the
-	// recipients that are not ours.
-	if _, err := bloom.Init(context.Background()); err != nil {
-		logrus.Error("address bloom filter init failed,", ",err:", err)
-		return nil, err
+	// Only the scanner matches on-chain recipients against the filter, so only
+	// it loads every deposit address into memory. The other services talk to
+	// the scanner over http instead of keeping their own copy.
+	if needsAddressFilter(service) {
+		if _, err := bloom.Init(context.Background()); err != nil {
+			logrus.Error("address bloom filter init failed,", ",err:", err)
+			return nil, err
+		}
 	}
 	gw, err := chain.NewGateway(cfg.Chain)
 	if err != nil {
@@ -73,6 +75,10 @@ func Init(service string) (*App, error) {
 		return nil, err
 	}
 	return &App{Gateway: gw}, nil
+}
+
+func needsAddressFilter(service string) bool {
+	return service == "scanner"
 }
 
 // SignerClient builds the sign-service client.

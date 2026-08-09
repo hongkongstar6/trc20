@@ -3,6 +3,8 @@ package bloom
 import (
 	"context"
 	"net"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,8 @@ func TestNotifyAddsTheAddressToTheServedFilter(t *testing.T) {
 		NotifyTimeout:     "3s",
 	}
 	r := GetNew(1000, 0.0001) // &bloom.Registry{filter: bloom.NewBloomFilter(1000, 0.0001)}
+	AddrFilter = r
+	defer func() { AddrFilter = nil }()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -47,10 +51,63 @@ func TestNotifyAddsTheAddressToTheServedFilter(t *testing.T) {
 	}
 
 	// A wrong token must not be able to poison the filter.
-	config.Cfg.Bloom.Token = "wrong"
-	if err := Notify(ctx, "TVjsyZ7fYF3qLF6BQgPmTEZy1xrNNyVAAA"); err == nil {
-		t.Fatal("a push with a bad token must be rejected")
+	req, err := http.NewRequest(http.MethodPost, config.Cfg.Bloom.BloomNotifyURL,
+		strings.NewReader(`{"addresses":["TVjsyZ7fYF3qLF6BQgPmTEZy1xrNNyVAAA"]}`))
+	if err != nil {
+		t.Fatal(err)
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Bloom-Token", "wrong")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a push with a bad token must be rejected, got %s", resp.Status)
+	}
+}
+
+// A scanner that is momentarily down must not cost the address: the push is
+// retried once and the allocation itself never blocks on it.
+func TestNotifyWithRetryRetriesOnceAfterAFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	addr := freeAddr(t)
+	config.Cfg = &config.Config{}
+	config.Cfg.Bloom = config.BloomConfig{
+		ExpectedAddresses: 1000,
+		FalsePositiveRate: 0.0001,
+		Listen:            addr,
+		BloomNotifyURL:    "http://" + addr + addressPath,
+		NotifyTimeout:     "1s",
+	}
+	notifyRetryDelay = 200 * time.Millisecond
+	defer func() { notifyRetryDelay = 10 * time.Second }()
+
+	r := GetNew(1000, 0.0001)
+	AddrFilter = r
+	defer func() { AddrFilter = nil }()
+
+	const address = "TVjsyZ7fYF3qLF6BQgPmTEZy1xrNNyVAAA"
+	// Nothing is listening yet, so the first push fails.
+	NotifyWithRetry(address)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		if err := Serve(ctx); err != nil {
+			t.Error("serve:", err)
+		}
+	}()
+	waitUp(t, addr)
+
+	for i := 0; i < 100; i++ {
+		if r.MayContain(address) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("the retried push must reach the scanner once it is back up")
 }
 
 func TestNotifyIsANoOpWithoutURL(t *testing.T) {

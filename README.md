@@ -205,13 +205,14 @@ POST /v1/address  {"merchant_id":"m1","uid":"1001","sign":"<sha256>"}
 
 生命周期：
 
-1. 进程启动（`bootstrap.Init`）时按 id 分页读取 `user_wallet` 全表，把所有专属
-   地址加入过滤器。2 万个地址在 `false_positive_rate: 0.0001` 下约占 48 KB 内存。
-2. `POST /v1/address` 分配新地址后，api 先加进自己的过滤器，再 POST 推送给
-   scanner（api 与 scanner 是两个进程），scanner 收到即刻加入，下一个区块就能命中。
-3. 兜底：推送失败或 scanner 重启时，scanner 每 `bloom.sync_interval` 按
-   `id > max_id` 从 `user_wallet` 增量补齐，所以一次推送失败不会丢地址，
-   api 也不会因为 scanner 短暂不可用而分配失败。
+1. 只有 scanner 会用过滤器匹配链上收款地址，所以只有 scanner 在 `bootstrap.Init`
+   时按 id 分页读取 `user_wallet` 全表建过滤器；api / sign / sweep / withdraw
+   不再各存一份。2 万个地址在 `false_positive_rate: 0.0001` 下约占 48 KB 内存。
+2. `POST /v1/address` 分配新地址后，api 异步 POST 推送给 scanner（两个进程），
+   scanner 收到即刻加入，下一个区块就能命中。推送不阻塞、也不影响分配结果。
+3. 兜底：推送失败时 10 秒后自动重推一次，仍失败即放弃；scanner 每
+   `bloom.sync_interval` 按 `id > max_id` 从 `user_wallet` 增量补齐，
+   所以一次推送失败不会丢地址，api 也不会因为 scanner 短暂不可用而分配失败。
 4. 地址数超过 `bloom.expected_addresses` 后，过滤器会以两倍容量从全表重建，
    避免过载的过滤器把请求全部压回 MySQL。
 

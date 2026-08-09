@@ -295,3 +295,28 @@ func TestLoadSyntaxErrorMentionsTheLine(t *testing.T) {
 		t.Fatalf("error = %v, want the offending line quoted", err)
 	}
 }
+
+// The shipped configs/config.yaml is the file baked into the docker image, so
+// docker compose's MYSQL_DSN must win over the value written in it.
+func TestShippedConfigHonorsMySQLDSNEnv(t *testing.T) {
+	path := filepath.Join("..", "..", "configs", "config.yaml")
+	t.Setenv("ENV_FILE", filepath.Join(t.TempDir(), "absent.env"))
+	t.Setenv("MYSQL_DSN", "wallet:wallet@tcp(mysql:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MySQL.DSN != os.Getenv("MYSQL_DSN") {
+		t.Fatalf("mysql dsn = %q, want the MYSQL_DSN value", cfg.MySQL.DSN)
+	}
+
+	os.Unsetenv("MYSQL_DSN")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load without MYSQL_DSN: %v", err)
+	}
+	if !strings.Contains(cfg.MySQL.DSN, "127.0.0.1:3306") {
+		t.Fatalf("fallback dsn = %q, want the in-file default", cfg.MySQL.DSN)
+	}
+}

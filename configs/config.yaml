@@ -14,8 +14,9 @@ log:
     log_dir: "./log" #日志路径
 
 mysql_server:
+    # docker compose 注入的 MYSQL_DSN 优先；默认值只在直接跑本机进程时生效。
     #dsn: "zhp01:Zhp1234%@tcp(43.153.210.204:11000)/pay?parseTime=true&loc=Local&charset=utf8mb4"
-    dsn: "root:rootpw%@tcp(127.0.0.1:3306)/pay?parseTime=true&loc=Local&charset=utf8mb4"
+    dsn: "${MYSQL_DSN:-root:rootpw%@tcp(127.0.0.1:3306)/pay?parseTime=true&loc=Local&charset=utf8mb4}"
     max_open_conns: 64
     max_idle_conns: 64
     conn_max_lifetime: 30m

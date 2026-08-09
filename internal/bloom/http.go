@@ -64,6 +64,7 @@ func (r *Registry) Serve(ctx context.Context) error {
 			"false_positive_rate": f.FalsePositiveRate(), "max_id": maxID,
 		})
 	})
+	//engine.Run()
 	srv := &http.Server{Addr: config.Cfg.Bloom.Listen, Handler: engine}
 	go func() {
 		<-ctx.Done()
@@ -83,6 +84,7 @@ func (r *Registry) Serve(ctx context.Context) error {
 // down, the periodic Sync picks the address up in that case.
 func Notify(ctx context.Context, addresses ...string) error {
 	url := config.Cfg.Bloom.BloomNotifyURL
+
 	if url == "" || len(addresses) == 0 {
 		return nil
 	}

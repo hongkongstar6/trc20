@@ -13,19 +13,19 @@ log:
     level: info
     log_dir: "./log" #日志路径
 
-mysql:
+mysql_server:
     dsn: "zhp01:Zhp1234%@tcp(43.153.210.204:11000)/pay?parseTime=true&loc=Local&charset=utf8mb4"
     max_open_conns: 64
     max_idle_conns: 64
     conn_max_lifetime: 30m
 
-redis:
+redis_server:
     addr: "${REDIS_ADDR:-127.0.0.1:6379}"
     password: "${REDIS_PASSWORD:-}"
     db: 0
     prefix: "wallet:nile"
 
-api:
+api_server:
     listen: ":8080"
     hmac_secret: "${API_HMAC_SECRET}"
     # Mainnet must pin the business system egress IPs.
@@ -35,7 +35,7 @@ api:
     signature_skew: 5m
     nonce_ttl: 10m
 
-sign:
+sign_server:
     listen: ":8090"
     endpoint: "${SIGN_ENDPOINT:-http://127.0.0.1:8090}"
     token: "${SIGN_TOKEN}"
@@ -98,17 +98,17 @@ deposit:
 
 # 专属地址布隆过滤器：进程内纯 Go 实现，启动时全量加载 user_wallet 地址。
 # 区块里的收款地址先过布隆，未命中直接丢弃，命中才回 mysql 查用户。
-bloom:
-    expected_addresses: 200000 # 按地址规模预留，超出后自动翻倍重建
-    false_positive_rate: 0.0001
+scanner_server:
     listen: "${BLOOM_LISTEN:-:8091}" # scanner 的地址同步端口
     bloom_notify_url: "${BLOOM_NOTIFY_URL:-http://127.0.0.1:8091/internal/bloom/address}" # api 分配地址后推送给 scanner
     token: "${BLOOM_TOKEN:-}"
     notify_timeout: 3s
     sync_interval: 10s # 推送失败/scanner 重启的兜底：按 id 增量补齐
     load_batch: 5000 #
+    expected_addresses: 200000 # 按地址规模预留，超出后自动翻倍重建
+    false_positive_rate: 0.0001
 
-withdraw:
+withdraw_server:
     enabled: true
     poll_interval: 3s
     fee_limit_sun: 40000000 # 40 TRX ceiling, only spent when energy is short
@@ -118,7 +118,7 @@ withdraw:
     confirm_blocks: 19
     address_blacklist: []
 
-sweep:
+sweep_server:
     enabled: true
     interval: 5m
     fee_limit_sun: 40000000

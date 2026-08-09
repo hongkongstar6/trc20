@@ -20,18 +20,18 @@ type Config struct {
 	Env      string         `yaml:"env"`
 	Network  string         `yaml:"network"` // mainnet | nile
 	Log      LogConfig      `yaml:"log"`
-	MySQL    MySQLConfig    `yaml:"mysql"`
-	Redis    RedisConfig    `yaml:"redis"`
-	API      APIConfig      `yaml:"api"`
-	Sign     SignConfig     `yaml:"sign"`
+	MySQL    MySQLConfig    `yaml:"mysql_server"`
+	Redis    RedisConfig    `yaml:"redis_server"`
+	API      APIConfig      `yaml:"api_server"`
+	Sign     SignConfig     `yaml:"sign_server"`
+	Wallet   WalletConfig   `yaml:"wallet_server"`
+	Sweep    SweepConfig    `yaml:"sweep_server"`
+	Bloom    BloomConfig    `yaml:"scanner_server"`
 	Chain    ChainConfig    `yaml:"chain"`
-	Wallet   WalletConfig   `yaml:"wallet"`
 	Deposit  DepositConfig  `yaml:"deposit"`
 	Withdraw WithdrawConfig `yaml:"withdraw"`
-	Sweep    SweepConfig    `yaml:"sweep"`
 	Energy   EnergyConfig   `yaml:"energy"`
 	Notify   NotifyConfig   `yaml:"notify"`
-	Bloom    BloomConfig    `yaml:"bloom"`
 }
 
 // BloomConfig sizes the in-memory bloom filter holding every deposit address.

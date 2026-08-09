@@ -14,7 +14,7 @@ import (
 
 func main() {
 
-	app, err := bootstrap.Init("deposit-scanner")
+	app, err := bootstrap.Init("scanner")
 	if err != nil {
 		panic(err)
 	}

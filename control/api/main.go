@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	app, err := bootstrap.Init("wallet-api")
+	app, err := bootstrap.Init("api")
 	if err != nil {
 		panic(err)
 	}

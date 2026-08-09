@@ -110,7 +110,9 @@ services:
     environment: 
       <<: *env
       TZ: Asia/Shanghai
-    depends_on: [api]
+    depends_on: 
+      #mysql: { condition: service_healthy }
+      api: { condition: service_started }
     volumes:
       - ./log:/app/log
     networks: [wallet]

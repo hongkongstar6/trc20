@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	_, err := bootstrap.Init("sign-service")
+	_, err := bootstrap.Init("sign")
 	if err != nil {
 		panic(err)
 	}

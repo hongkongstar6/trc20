@@ -16,7 +16,7 @@ import (
 
 // 归集
 func main() {
-	app, err := bootstrap.Init("sweep-service")
+	app, err := bootstrap.Init("sweep")
 	if err != nil {
 		panic(err)
 	}

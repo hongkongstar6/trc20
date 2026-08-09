@@ -397,11 +397,23 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	if !ok {
 		return nil, false, nil
 	}
+	switch t.to {
+	case "TBLsy8bdiUFjK1ihE7q3qTSAghvMHfFBPZ",
+		"TAT3M8mQBDd8NHrAaoPbznpcNL52PfC8S1",
+		"THxswgba4LqY5unsUQYwekdKTd1wEUvgB6",
+		"TWtf7FRwNpFGPN7Bt287UkVvKadaESqwxK",
+		"TH3WrXhtTRExX3kUjF1aLH1hYxWVBwaYcV":
+		logrus.Info("第一次找到了", t.to)
+	}
+
 	// The bloom filter answers "definitely not ours" for virtually every
 	// recipient on chain, so only the few possible hits reach MySQL.
 	if !bloom.AddrFilter.MayContain(t.to) {
+		logrus.Error("地址匹配失败", t.to)
 		return nil, false, nil
 	}
+	logrus.Info("地址匹配成功1", t.to)
+
 	var wallet model.UserWallet
 	err := store.MyStore.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

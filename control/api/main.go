@@ -56,6 +56,7 @@ func main() {
 	dispatcher := outbox.NewDispatcher(config.Cfg.Notify, publishers...)
 
 	go func() {
+		//充值订单发送给业务服
 		if err := dispatcher.Run(ctx); err != nil {
 			logrus.Error("outbox dispatcher stopped", ",err:", err)
 		}

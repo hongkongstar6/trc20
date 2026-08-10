@@ -51,11 +51,15 @@ func (s *Server) Router() *gin.Engine {
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
 	v1 := r.Group("/v1", s.ipAllowlist(), s.authenticate())
+
 	v1.POST("/merchant", s.upsertMerchant)
 	v1.GET("/merchants", s.listMerchants)
-	v1.POST("/address", s.createAddress)
+
+	v1.POST("/address", s.createAddress) //获取专属地址
+
 	v1.POST("/withdraw", s.createWithdraw)
 	v1.GET("/withdraw/:biz_order_no", s.getWithdraw)
+
 	v1.GET("/deposits", s.listDeposits)
 	v1.GET("/deposit/:event_id", s.getDeposit)
 	v1.GET("/events", s.listEvents)

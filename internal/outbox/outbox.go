@@ -249,7 +249,7 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 		logrus.Error("发送失败2,err:", err)
 		return fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(raw), 120))
 	}
-	logrus.Error("订单发送成功,err:", event.Account, event.Payload)
+	logrus.Debug("订单发送成功,err:", event.Account, event.Payload)
 	return nil
 }
 

@@ -55,7 +55,7 @@ sign_server:
 chain: #扫块配置节点
     # FullNode first once it is ready; TronGrid stays as the failover.
     nodes:
-        #- name: fullnode
+        #- name: fullnode #自建节点
         #   type: fullnode
         #  endpoint: "https://api.trongrid.io" #"${FULLNODE_ENDPOINT}" #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
         #  priority: 1

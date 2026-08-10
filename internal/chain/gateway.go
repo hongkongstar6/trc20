@@ -313,13 +313,6 @@ func (g *Gateway) GetBlockByNum(ctx context.Context, num int64) (*Block, error) 
 	return &b, nil
 }
 
-// TxLog is one contract event log inside a transaction info entry.
-type TxLog struct {
-	Address string   `json:"address"` //抛出该事件的智能合约地址 hex, 41 prefixed
-	Topics  []string `json:"topics"`  //事件的签名 Hash（topics[0]）以及被 indexed 标记的参数
-	Data    string   `json:"data"`
-}
-
 // TxInfo is the receipt style structure returned by gettransactioninfo*.
 type TxInfo struct {
 	ID              string `json:"id"`
@@ -332,9 +325,16 @@ type TxInfo struct {
 		NetUsage         int64  `json:"net_usage"`
 		Result           string `json:"result"`
 	} `json:"receipt"`
-	Log        []TxLog `json:"log"`
+	Log        []TxLog `json:"log"` //里面含有
 	Result     string  `json:"result"`
 	ResMessage string  `json:"resMessage"`
+}
+
+// TxLog is one contract event log inside a transaction info entry.
+type TxLog struct {
+	Address string   `json:"address"` //抛出该事件的智能合约地址 hex, 41 prefixed
+	Topics  []string `json:"topics"`  //事件的签名 Hash（topics[0]）以及被 indexed 标记的参数
+	Data    string   `json:"data"`
 }
 
 // Succeeded reports whether the contract execution itself succeeded. A failed

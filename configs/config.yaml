@@ -202,9 +202,14 @@ energy:
                 deposit_address: "https://tronenergyrent.com" #"${TRONENERGYRENT_DEPOSIT_ADDRESS}"
 
 notify:
+    # 充值到账通知走商户回调：事件按 merchant_id 投递到 merchant.callback_url，
+    # 该发布器始终开启，无需在这里配置。
     http:
-        enabled: true
-        url: "${NOTIFY_URL:-http://127.0.0.1:9000/wallet/callback}"
+        # 可选的平台级统一回调（所有商户的事件都额外 POST 到同一个地址）。
+        # 默认关闭：开启但 NOTIFY_URL 指向未启动的服务时，notify_outbox.last_error
+        # 里会一直是 connection refused。容器内访问宿主机服务用 host.docker.internal。
+        enabled: false
+        url: "${NOTIFY_URL}"
         secret: "${NOTIFY_SECRET}"
         timeout: 10s
     rocketmq:

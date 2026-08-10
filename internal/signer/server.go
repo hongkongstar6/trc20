@@ -23,14 +23,15 @@ func InitRouter(r *gin.Engine, svc *Service, token string) {
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
 	v1 := r.Group("/v1", authorize(token))
-	v1.POST("/sign", svc.Sign1)
-	v1.POST("/derive", svc.Derive)
+	v1.POST("/sign", svc.Sign1)    //用私钥对交易进行签名
+	v1.POST("/derive", svc.Derive) //生成专属地址
 
 }
 
 // v1/sign
 func (svc *Service) Sign1(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+
 	var req SignRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

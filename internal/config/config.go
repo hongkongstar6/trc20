@@ -98,8 +98,8 @@ type SignConfig struct {
 	Endpoint string `yaml:"endpoint"`
 	Token    string `yaml:"token"`
 	// Mnemonic must come from a secret manager / env var, never from git.
-	Mnemonic   string `yaml:"mnemonic"`
-	Passphrase string `yaml:"passphrase"`
+	Mnemonic   string `yaml:"mnemonic"`   //助记词
+	Passphrase string `yaml:"passphrase"` //口令
 	TLS        struct {
 		Enabled    bool   `yaml:"enabled"`
 		CertFile   string `yaml:"cert_file"`

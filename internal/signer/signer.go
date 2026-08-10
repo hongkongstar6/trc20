@@ -88,11 +88,13 @@ func New(cfg config.SignConfig, policy Policy, audit AuditSink) (*Service, error
 
 // DeriveAddress exposes address derivation so wallet-api can allocate deposit
 // addresses without ever holding the seed.
+// 分配专属地址
 func (s *Service) DeriveAddress(path string) (string, error) {
 	return s.wallet.DeriveAddress(path)
 }
 
 // Sign validates the request against the policy and returns the signed tx.
+// 用私钥对交易内容(转账数据)签名
 func (s *Service) Sign(ctx context.Context, req *SignRequest, caller string) (*SignResponse, error) {
 	reason, err := s.check(req)
 	if err != nil {

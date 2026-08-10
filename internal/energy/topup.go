@@ -30,13 +30,14 @@ import (
 //   - only one refill runs at a time, and a previous unsettled refill blocks the
 //     next one, because provider crediting lags the on-chain confirmation.
 type Topup struct {
-	cfg config.AutoTopupConfig
-	//st     *store.Store
-	gw     *chain.Gateway
-	signer *signer.Client
-	//log     *logrus.Logger
+	cfg     config.AutoTopupConfig
+	gw      *chain.Gateway
+	signer  *signer.Client
 	provs   map[string]Provider
 	gasPath string
+
+	//st     *store.Store
+	//log     *logrus.Logger
 }
 
 func NewTopup(cfg config.AutoTopupConfig, st *store.Store, gw *chain.Gateway, sign *signer.Client, log *logrus.Logger, provs map[string]Provider, gasPath string) *Topup {

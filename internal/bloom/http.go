@@ -103,7 +103,9 @@ func NotifyWithRetry(addresses ...string) {
 		}
 		logrus.Error("push address to scanner failed, retrying",
 			",addresses:", addresses, ",retry_in:", notifyRetryDelay, ",err:", err)
+
 		time.Sleep(notifyRetryDelay)
+
 		if err := Notify(context.Background(), addresses...); err != nil {
 			// Giving up is safe: the scanner re-reads user_wallet by id every
 			// sync_interval, so the address is matched from then on.

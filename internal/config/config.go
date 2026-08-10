@@ -188,7 +188,8 @@ type WithdrawConfig struct {
 }
 
 type SweepConfig struct {
-	Enabled     bool                 `yaml:"enabled"`
+	Enabled bool `yaml:"enabled"`
+	// Interval is the delay between two sweep rounds, e.g. "3600s" or "1h".
 	Interval    string               `yaml:"interval"`
 	FeeLimitSun int64                `yaml:"fee_limit_sun"`
 	Threshold   SweepThresholdConfig `yaml:"threshold"`
@@ -209,6 +210,14 @@ type SweepThresholdConfig struct {
 	// StaleDays force-sweeps addresses that stayed below the threshold for
 	// too long so dust cannot accumulate forever.
 	StaleDays int `yaml:"stale_days"`
+	// FixedUSDT pins the threshold to a constant amount of USDT, e.g. 100 to
+	// leave every wallet holding less than 100 USDT alone. It disables the
+	// runtime break-even computation entirely; 0 keeps that computation.
+	FixedUSDT float64 `yaml:"fixed_usdt"`
+	// MaxSkipRounds force-sweeps an address that was skipped for being below
+	// the threshold that many rounds in a row, so a wallet that never reaches
+	// the threshold still reaches the finance wallet. 0 disables it.
+	MaxSkipRounds int `yaml:"max_skip_rounds"`
 }
 
 type EnergyConfig struct {

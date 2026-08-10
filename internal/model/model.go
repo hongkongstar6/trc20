@@ -177,6 +177,21 @@ type SweepRecord struct {
 
 func (SweepRecord) TableName() string { return "sweep_record" }
 
+// SweepSkip counts the consecutive rounds an address was left alone for
+// holding less than the minimum sweep amount. Once the count reaches
+// sweep_server.threshold.max_skip_rounds the address is swept anyway, so a
+// wallet that never grows past the threshold still reaches the finance
+// wallet. The row is deleted as soon as the address is swept.
+type SweepSkip struct {
+	Address    string    `gorm:"size:64;primaryKey" json:"address"`
+	SkipCount  int       `json:"skip_count"`
+	LastSkipAt time.Time `json:"last_skip_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+func (SweepSkip) TableName() string { return "sweep_skip" }
+
 // EnergyRentOrder normalises orders across every rental provider.
 type EnergyRentOrder struct {
 	ID              int64      `gorm:"primaryKey" json:"id"`
@@ -290,6 +305,7 @@ func AllModels() []any {
 		&DepositRecord{},
 		&WithdrawRecord{},
 		&SweepRecord{},
+		&SweepSkip{},
 		&EnergyRentOrder{},
 		&TopupRecord{},
 		&ChainCursor{},

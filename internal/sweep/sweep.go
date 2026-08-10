@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
@@ -50,7 +51,7 @@ func New(gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pricer *en
 	if config.Cfg.Wallet.FinanceWallet.Address == "" {
 		return nil, errors.New("sweep: wallet.finance_wallet.address is required")
 	}
-	return &Service{gw: gw, sign: sign, mgr: mgr, pricer: pricer, token: token}, nil
+	return &Service{gw: gw, sign: sign, mgr: mgr, pricer: pricer, token: token, log: logrus.StandardLogger()}, nil
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -81,6 +82,7 @@ func (s *Service) round(ctx context.Context) error {
 		return err
 	}
 	minUnits := s.minSweepUnits()
+	maxSkips := config.Cfg.Sweep.Threshold.MaxSkipRounds
 	for _, addr := range candidates {
 		balance, err := s.tokenBalance(ctx, addr.Address)
 		if err != nil {
@@ -90,14 +92,49 @@ func (s *Service) round(ctx context.Context) error {
 		if balance.Sign() <= 0 {
 			continue
 		}
-		if balance.Cmp(minUnits) < 0 && !s.isStale(ctx, addr.Address) {
-			continue
+		// Above the threshold the very first round already sweeps; below it the
+		// address waits until it was skipped max_skip_rounds times (or went
+		// stale), so small balances still reach the finance wallet eventually.
+		if balance.Cmp(minUnits) < 0 {
+			skips, err := s.recordSkip(ctx, addr.Address)
+			if err != nil {
+				s.log.Error("sweep skip counter failed", "address", addr.Address, ",err:", err)
+				continue
+			}
+			forced := maxSkips > 0 && skips >= maxSkips
+			if !forced && !s.isStale(ctx, addr.Address) {
+				continue
+			}
+			s.log.Info("sweeping below-threshold address", "address", addr.Address,
+				"balance", balance.String(), "min_units", minUnits.String(), "skips", skips)
 		}
 		if err := s.sweepOne(ctx, addr, balance); err != nil {
 			s.log.Error("sweep failed", "address", addr.Address, ",err:", err)
 		}
 	}
 	return nil
+}
+
+// recordSkip counts one more skipped round for the address and returns the new
+// total. The counter is cleared once a sweep of the address is confirmed.
+func (s *Service) recordSkip(ctx context.Context, address string) (int, error) {
+	now := time.Now()
+	err := store.MyStore.DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "address"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"skip_count":   gorm.Expr("skip_count + 1"),
+			"last_skip_at": now,
+			"updated_at":   now,
+		}),
+	}).Create(&model.SweepSkip{Address: address, SkipCount: 1, LastSkipAt: now}).Error
+	if err != nil {
+		return 0, err
+	}
+	var row model.SweepSkip
+	if err := store.MyStore.DB.WithContext(ctx).Where("address = ?", address).Take(&row).Error; err != nil {
+		return 0, err
+	}
+	return row.SkipCount, nil
 }
 
 // candidates are deposit addresses with confirmed unswept deposits.
@@ -299,9 +336,12 @@ func (s *Service) Reconcile(ctx context.Context) error {
 				}).Error; err != nil {
 				return err
 			}
-			return tx.Model(&model.DepositRecord{}).
+			if err := tx.Model(&model.DepositRecord{}).
 				Where("to_address = ? AND status = ? AND swept = ?", row.FromAddress, model.DepositStateConfirmed, false).
-				UpdateColumns(map[string]any{"swept": true, "updated_at": now}).Error
+				UpdateColumns(map[string]any{"swept": true, "updated_at": now}).Error; err != nil {
+				return err
+			}
+			return tx.Where("address = ?", row.FromAddress).Delete(&model.SweepSkip{}).Error
 		})
 		if err != nil {
 			s.log.Error("sweep reconcile failed", "id", row.ID, ",err:", err)

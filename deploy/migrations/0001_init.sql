@@ -215,6 +215,18 @@ CREATE TABLE IF NOT EXISTS `sweep_record`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for sweep_skip
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sweep_skip`  (
+  `address` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `skip_count` bigint NULL DEFAULT NULL,
+  `last_skip_at` datetime(3) NULL DEFAULT NULL,
+  `created_at` datetime(3) NULL DEFAULT NULL,
+  `updated_at` datetime(3) NULL DEFAULT NULL,
+  PRIMARY KEY (`address`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for topup_record
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `topup_record`  (

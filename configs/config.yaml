@@ -126,7 +126,7 @@ withdraw_server:
 
 sweep_server:
     enabled: true
-    interval: 5m
+    interval: 3600s # 归集频率：每隔多久跑一轮归集（3600s = 每小时一次）
     fee_limit_sun: 40000000
     max_per_round: 50
     lock_ttl: 10m
@@ -134,6 +134,12 @@ sweep_server:
         # min_sweep is computed at runtime, never hard coded:
         #   cost_usd  = (energy quote + bandwidth burn) * TRX/USD
         #   min_sweep = max(cost_usd / target_cost_ratio, cost_usd * safety_multiple)
+        # fixed_usdt > 0 时直接写死归集门槛，忽略上面的运行时计算：
+        # 例如 100 表示余额小于 100 USDT 的钱包暂不归集
+        fixed_usdt: 100
+        # 归集次数：低于门槛被跳过 max_skip_rounds 次后强制归集到金融钱包，
+        # 0 表示关闭（只靠 stale_days 兜底）。余额达标的钱包第一轮就归集。
+        max_skip_rounds: 5
         target_cost_ratio: 0.005
         safety_multiple: 20
         min_usdt: 50

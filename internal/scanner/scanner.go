@@ -48,11 +48,12 @@ type token struct {
 }
 
 type Scanner struct {
-	gw      *chain.Gateway
-	tokens  map[string]token // contract (base58) -> token
-	minUnit *big.Int
-	// the cursor is validated against the chain once per process start
+	gw            *chain.Gateway
+	tokens        map[string]token // contract (base58) -> token
+	minUnit       *big.Int
 	cursorChecked bool
+
+	// the cursor is validated against the chain once per process start
 	//cfg *config.Config
 	//st *store.Store
 	//log     *logrus.Logger
@@ -65,6 +66,7 @@ func New(gw *chain.Gateway) *Scanner {
 			tokens[t.Contract] = token{symbol: t.Symbol, decimals: t.Decimals}
 		}
 	}
+
 	minUnit := new(big.Int)
 	if _, ok := minUnit.SetString(config.Cfg.Deposit.MinDepositUnits, 10); !ok {
 		minUnit = big.NewInt(0)
@@ -97,11 +99,11 @@ func (s *Scanner) Run(ctx context.Context) error {
 	for {
 		behind, err := s.tick(ctx)
 		if err != nil {
+			logrus.Error("scan tick failed,err:", err)
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
 			// A node outage must stall the cursor, never skip blocks.
-			logrus.Error("scan tick failed,err:", err)
 		}
 		if err == nil && behind {
 			// Still lagging: keep scanning instead of idling for a whole
@@ -156,6 +158,7 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 		block := fetched[i].block
 		if cursor.BlockHash != "" && block.BlockHeader.RawData.ParentHash != "" &&
 			!strings.EqualFold(block.BlockHeader.RawData.ParentHash, cursor.BlockHash) {
+
 			logrus.Warn("reorg detected,block:", num, ",parent:", block.BlockHeader.RawData.ParentHash, ",cursor_hash:", cursor.BlockHash)
 			newCursor, err := s.handleReorg(ctx, num)
 			if err != nil {

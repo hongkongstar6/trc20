@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -42,6 +43,7 @@ func Open() (*Store, error) {
 		}),
 	})
 	if err != nil {
+		logrus.Error("mysql连接错误:", config.Cfg.MySQL.DSN, ",err:", err)
 		return nil, fmt.Errorf("store: open mysql: %w", err)
 	}
 	sqlDB, err := gdb.DB()

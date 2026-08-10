@@ -16,6 +16,8 @@ import (
 // Pricer computes the sweep threshold at runtime from the current provider
 // quote, the current chain parameters and the current TRX price. Nothing is
 // hard coded: an energy price proposal or a TRX rally changes the answer.
+// A configured fixed_usdt overrides the whole computation and pins the
+// threshold to that amount.
 //
 //	cost_trx  = cheapest energy quote + bandwidth burn when the free quota is short
 //	cost_usd  = cost_trx * trx_usd
@@ -64,6 +66,9 @@ func (p *Pricer) Run(ctx context.Context) error {
 // MinSweepUSDT returns the current threshold, falling back to the configured
 // minimum before the first successful refresh.
 func (p *Pricer) MinSweepUSDT() float64 {
+	if p.cfg.FixedUSDT > 0 {
+		return p.cfg.FixedUSDT
+	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if p.threshold > 0 {
@@ -109,15 +114,18 @@ func (p *Pricer) Refresh(ctx context.Context) error {
 		return fmt.Errorf("no TRX price available")
 	}
 	costUSD := costTRX * trxUSD
-	threshold := costUSD / p.cfg.TargetCostRatio
-	if floor := costUSD * p.cfg.SafetyMultiple; floor > threshold {
-		threshold = floor
-	}
-	if p.cfg.MinUSDT > 0 && threshold < p.cfg.MinUSDT {
-		threshold = p.cfg.MinUSDT
-	}
-	if p.cfg.MaxUSDT > 0 && threshold > p.cfg.MaxUSDT {
-		threshold = p.cfg.MaxUSDT
+	threshold := p.cfg.FixedUSDT
+	if threshold <= 0 {
+		threshold = costUSD / p.cfg.TargetCostRatio
+		if floor := costUSD * p.cfg.SafetyMultiple; floor > threshold {
+			threshold = floor
+		}
+		if p.cfg.MinUSDT > 0 && threshold < p.cfg.MinUSDT {
+			threshold = p.cfg.MinUSDT
+		}
+		if p.cfg.MaxUSDT > 0 && threshold > p.cfg.MaxUSDT {
+			threshold = p.cfg.MaxUSDT
+		}
 	}
 
 	p.mu.Lock()

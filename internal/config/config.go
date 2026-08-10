@@ -4,12 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/hongkongstar6/trc20/internal/tron"
 )
 
 var Cfg *Config
@@ -24,12 +28,12 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis_server"`
 	API      APIConfig      `yaml:"api_server"`
 	Sign     SignConfig     `yaml:"sign_server"`
-	Wallet   WalletConfig   `yaml:"wallet_server"`
+	Wallet   WalletConfig   `yaml:"wallet"`
 	Sweep    SweepConfig    `yaml:"sweep_server"`
 	Bloom    BloomConfig    `yaml:"scanner_server"`
 	Chain    ChainConfig    `yaml:"chain"`
 	Deposit  DepositConfig  `yaml:"deposit"`
-	Withdraw WithdrawConfig `yaml:"withdraw"`
+	Withdraw WithdrawConfig `yaml:"withdraw_server"`
 	Energy   EnergyConfig   `yaml:"energy"`
 	Notify   NotifyConfig   `yaml:"notify"`
 }
@@ -310,6 +314,9 @@ func Load(path string) (*Config, error) {
 	if doc.Kind == 0 {
 		return nil, fmt.Errorf("parse config %s: file is empty", path)
 	}
+	if err := checkSections(&doc); err != nil {
+		return nil, fmt.Errorf("config %s: %w", path, err)
+	}
 	expandEnvNode(&doc)
 	var c Config
 	if err := doc.Decode(&c); err != nil {
@@ -321,6 +328,54 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return Cfg, nil
+}
+
+// checkSections rejects a top level key that no field of Config maps to. yaml
+// silently ignores an unmapped key, so a section renamed in the file but not in
+// the struct (or the other way round) would leave that whole part of the config
+// at its zero value: an empty wallet.tokens allowlist makes the scanner drop
+// every Transfer log it sees, which looks like deposits that never arrive.
+func checkSections(doc *yaml.Node) error {
+	root := doc
+	if root.Kind == yaml.DocumentNode {
+		if len(root.Content) == 0 {
+			return nil
+		}
+		root = root.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	known := configSections()
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key := root.Content[i].Value
+		if _, ok := known[key]; !ok {
+			return fmt.Errorf("unknown section %q (known sections: %s)", key, strings.Join(sortedKeys(known), ", "))
+		}
+	}
+	return nil
+}
+
+func configSections() map[string]struct{} {
+	t := reflect.TypeOf(Config{})
+	out := make(map[string]struct{}, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		name := strings.Split(t.Field(i).Tag.Get("yaml"), ",")[0]
+		if name == "" {
+			name = strings.ToLower(t.Field(i).Name)
+		}
+		out[name] = struct{}{}
+	}
+	return out
+}
+
+func sortedKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // expandEnvNode substitutes ${ENV} / ${ENV:-default} inside every scalar of the
@@ -475,6 +530,24 @@ func (c *Config) validate() error {
 	}
 	if enabled == 0 {
 		return fmt.Errorf("chain.nodes: at least one enabled node is required")
+	}
+	// Without an enabled token the deposit scanner has an empty contract
+	// allowlist and silently ignores every transfer on chain.
+	tokens := 0
+	for _, t := range c.Wallet.Tokens {
+		if !t.Enabled {
+			continue
+		}
+		if !tron.IsValidAddress(t.Contract) {
+			return fmt.Errorf("wallet.tokens[%s].contract %q is not a base58 TRON address", t.Symbol, t.Contract)
+		}
+		if t.Decimals <= 0 {
+			return fmt.Errorf("wallet.tokens[%s].decimals is required", t.Symbol)
+		}
+		tokens++
+	}
+	if tokens == 0 {
+		return fmt.Errorf("wallet.tokens: at least one enabled token is required")
 	}
 	if c.Energy.Mode == "fixed" && c.Energy.Fixed == "" {
 		return fmt.Errorf("energy.fixed is required when energy.mode=fixed")

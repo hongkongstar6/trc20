@@ -165,6 +165,19 @@ func UserWalletAddressesAfter(ctx context.Context, afterID int64, limit int) ([]
 	return rows, err
 }
 
+// UserWalletAddressesUpdatedSince reads the addresses of rows touched since
+// the given instant. Paging by id only sees inserts, so an address written by
+// an UPDATE (a row edited by hand, an address re-assigned) would stay invisible
+// to a running scanner until the next restart.
+func UserWalletAddressesUpdatedSince(ctx context.Context, since time.Time, limit int) ([]model.UserWallet, error) {
+	var rows []model.UserWallet
+	err := MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).
+		Select("id", "address").
+		Where("updated_at >= ?", since).
+		Order("updated_at asc").Limit(limit).Find(&rows).Error
+	return rows, err
+}
+
 func IsInternalWallet(ctx context.Context, row *model.WithdrawRecord, internal *int64) error {
 	//var internal int64
 	err := MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).

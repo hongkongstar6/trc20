@@ -14,7 +14,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// 归集
+// 归集服务
+// 1. 监听链上充值事件或扫块
+// 2. 充值确认与风控校验,区块确认数达到19块
+// 3. 从第三方平台租赁手续费（TRX/能量）准备与划拨
+// 4.发起 TRC20 归集转账,1 调用TRC20 合约的 transfer 2用私钥签名,3 签名后的交易广播至波场网络
+// 5.归集结果确认与账目更新
 func main() {
 	app, err := bootstrap.Init("sweep")
 	if err != nil {

@@ -73,7 +73,7 @@ func TestSignedPayloadIsVerifiable(t *testing.T) {
 }
 
 func TestAccountIsUniquePerMerchant(t *testing.T) {
-	if Account("m1", "1001") == Account("m2", "1001") {
+	if MakeAccount("m1", "1001") == MakeAccount("m2", "1001") {
 		t.Fatal("the same uid under two merchants must be two accounts")
 	}
 }

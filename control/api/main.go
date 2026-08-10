@@ -35,13 +35,13 @@ func main() {
 	// The platform wide http callback is optional: without a configured
 	// NOTIFY_URL there is no endpoint to post to, and keeping the publisher on
 	// would only fill notify_outbox.last_error with connection refused.
-	switch {
-	case !config.Cfg.Notify.HTTP.Enabled:
-	case config.Cfg.Notify.HTTP.URL == "":
-		logrus.Warn("notify.http enabled but url is empty (NOTIFY_URL unset), platform callback disabled")
-	default:
-		publishers = append(publishers, outbox.NewHTTPPublisher(config.Cfg.Notify))
-	}
+	// switch {
+	// case !config.Cfg.Notify.HTTP.Enabled:
+	// case config.Cfg.Notify.HTTP.URL == "":
+	// 	logrus.Warn("notify.http enabled but url is empty (NOTIFY_URL unset), platform callback disabled")
+	// default:
+	// 	publishers = append(publishers, outbox.NewHTTPPublisher(config.Cfg.Notify))
+	// }
 	if config.Cfg.Notify.RocketMQ.Enabled {
 		mq, err := outbox.NewRocketMQPublisher(config.Cfg.Notify)
 		if err != nil {
@@ -52,7 +52,9 @@ func main() {
 		defer mq.Close()
 		publishers = append(publishers, mq)
 	}
+
 	dispatcher := outbox.NewDispatcher(config.Cfg.Notify, publishers...)
+
 	go func() {
 		if err := dispatcher.Run(ctx); err != nil {
 			logrus.Error("outbox dispatcher stopped", ",err:", err)

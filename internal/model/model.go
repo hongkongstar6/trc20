@@ -45,7 +45,7 @@ const (
 // the wallet system and is not serialised in API responses.
 type Merchant struct {
 	ID          int64     `gorm:"primaryKey" json:"id"`
-	MerchantID  string    `gorm:"column:merchant_id;size:64;uniqueIndex" json:"merchant_id"`
+	MerchantID  string    `gorm:"column:merchant_id;size:30;uniqueIndex" json:"merchant_id"`
 	Name        string    `gorm:"size:64" json:"name"`
 	CallbackURL string    `gorm:"size:255" json:"callback_url"`
 	Secret      string    `gorm:"size:128" json:"-"` // sha256 signing key
@@ -60,7 +60,7 @@ func (Merchant) TableName() string { return "merchant" }
 // derivation path, which is meaningless without the seed held by sign-service.
 type UserWallet struct {
 	ID         int64  `gorm:"primaryKey" json:"id"`
-	MerchantID string `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
+	MerchantID string `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
 	UID        string `gorm:"column:uid;index" json:"uid"`
 	// Account is merchant_id + "_" + uid, the unique account a deposit address
 	// is allocated for: the same uid under two merchants is two accounts.
@@ -94,8 +94,9 @@ func (WalletIndexAllocator) TableName() string { return "wallet_index_allocator"
 //光靠游标还不够，因为进程可能在扫到块、但还没保存游标之前就崩溃/重启，导致同一个块被重扫。为此，DepositRecord 表上以 (txid, event_index) 建了唯一索引 uq_tx_event
 type DepositRecord struct {
 	ID            int64      `gorm:"primaryKey" json:"id"`
-	MerchantID    string     `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
+	MerchantID    string     `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
 	Account       string     `gorm:"column:account;index" json:"account"`
+	Uid           string     `gorm:"column:uid" json:"uid"`
 	Chain         string     `gorm:"size:16" json:"chain"`
 	Symbol        string     `gorm:"size:16" json:"symbol"`
 	Contract      string     `gorm:"size:64" json:"contract"`
@@ -124,7 +125,8 @@ func (DepositRecord) TableName() string { return "deposit_record" }
 type WithdrawRecord struct {
 	ID          int64  `gorm:"primaryKey" json:"id"`
 	BizOrderNo  string `gorm:"size:64;uniqueIndex" json:"biz_order_no"`
-	UID         int64  `gorm:"column:uid;index" json:"uid"`
+	Account     string `gorm:"column:account;index" json:"account"`
+	MerchantID  string `gorm:"column:merchant_id;size:30" json:"merchant_id"`
 	Chain       string `gorm:"size:16" json:"chain"`
 	Symbol      string `gorm:"size:16" json:"symbol"`
 	Contract    string `gorm:"size:64" json:"contract"`
@@ -248,7 +250,8 @@ type NotifyOutbox struct {
 	EventID string `gorm:"size:96;uniqueIndex" json:"event_id"`
 	// MerchantID routes the event to that merchant's callback URL. Empty means
 	// the event only goes to the platform wide publishers.
-	MerchantID string     `gorm:"column:merchant_id;size:64;index" json:"merchant_id"`
+	MerchantID string     `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
+	Account    string     `gorm:"column:account;size:64;index" json:"account"`
 	EventType  string     `gorm:"size:32;index" json:"event_type"`
 	Payload    string     `gorm:"type:text" json:"payload"`
 	Status     string     `gorm:"size:16;index" json:"status"`

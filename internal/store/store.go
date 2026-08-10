@@ -132,7 +132,7 @@ func (s *Store) NextAddressIndex(ctx context.Context, chain string) (int64, erro
 // change and the notification commit atomically.
 // merchantID may be empty for platform level events; when set the dispatcher
 // also delivers the event to that merchant's callback URL.
-func EnqueueOutbox(tx *gorm.DB, eventID, eventType, merchantID string, payload any) error {
+func EnqueueOutbox(tx *gorm.DB, eventID, eventType, account, merchantID string, payload any) error {
 	blob, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -141,6 +141,7 @@ func EnqueueOutbox(tx *gorm.DB, eventID, eventType, merchantID string, payload a
 		EventID:    eventID,
 		EventType:  eventType,
 		MerchantID: merchantID,
+		Account:    account,
 		Payload:    string(blob),
 		Status:     model.OutboxStatePending,
 		NextRetry:  time.Now(),

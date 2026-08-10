@@ -258,7 +258,7 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 				return res.Error
 			}
 			logrus.Warn("withdraw rejected", "biz_order_no", row.BizOrderNo, "reason", reason)
-			return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", w.event(row, "rejected", reason, now))
+			return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", "", w.event(row, "rejected", reason, now))
 		},
 	)
 }
@@ -373,7 +373,7 @@ func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, r
 		if status != model.WithdrawStateConfirmed {
 			outcome = "failed"
 		}
-		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", w.event(&row, outcome, reason, now))
+		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", row.Account, row.MerchantID, w.event(&row, outcome, reason, now))
 	})
 }
 
@@ -382,7 +382,7 @@ func (w *Worker) event(row *model.WithdrawRecord, outcome, reason string, now ti
 		"event_id":     "withdraw:" + row.BizOrderNo,
 		"type":         "withdraw_result",
 		"biz_order_no": row.BizOrderNo,
-		"uid":          row.UID,
+		"account":      row.Account,
 		"chain":        row.Chain,
 		"symbol":       row.Symbol,
 		"amount":       row.AmountUnits,

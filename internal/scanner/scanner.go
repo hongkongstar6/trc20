@@ -433,6 +433,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	return &model.DepositRecord{
 		MerchantID:  wallet.MerchantID,
 		Account:     wallet.Account,
+		Uid:         wallet.UID,
 		Chain:       "TRON",
 		Symbol:      t.token.symbol,
 		Contract:    t.contract,
@@ -502,7 +503,9 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 		logrus.Warn("deposit moved to another block", "txid", rec.TxID, "old", rec.BlockNumber, "new", info.BlockNumber)
 		rec.BlockNumber = info.BlockNumber
 	}
-	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+
+	trans := func(tx *gorm.DB) error {
+		//更新表DepositRecord
 		res := tx.Model(&model.DepositRecord{}).
 			Where("id = ? AND status = ?", rec.ID, model.DepositStatePending).
 			UpdateColumns(map[string]any{
@@ -522,10 +525,11 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 			return nil // internal movements are not user deposits
 		}
 		event := map[string]any{
-			"event_id":     depositEventID(rec),
-			"type":         "deposit",
-			"merchant_id":  rec.MerchantID,
-			"account":      rec.Account,
+			"event_id":    depositEventID(rec),
+			"type":        "deposit",
+			"merchant_id": rec.MerchantID,
+			//"account":      rec.Account,
+			"uid":          rec.Uid,
 			"chain":        rec.Chain,
 			"symbol":       rec.Symbol,
 			"contract":     rec.Contract,
@@ -538,8 +542,11 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 			"block_number": rec.BlockNumber,
 			"confirmed_at": now.Unix(),
 		}
-		return store.EnqueueOutbox(tx, depositEventID(rec), "deposit", rec.MerchantID, event)
-	})
+		//event就是发送给商户的数据
+
+		return store.EnqueueOutbox(tx, depositEventID(rec), "deposit", rec.Account, rec.MerchantID, event)
+	}
+	return store.MyStore.DB.WithContext(ctx).Transaction(trans)
 }
 
 func depositEventID(rec model.DepositRecord) string {

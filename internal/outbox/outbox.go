@@ -148,13 +148,13 @@ type HTTPPublisher struct {
 	client *http.Client
 }
 
-func NewHTTPPublisher(cfg config.NotifyConfig) *HTTPPublisher {
-	return &HTTPPublisher{
-		url:    cfg.HTTP.URL,
-		secret: cfg.HTTP.Secret,
-		client: &http.Client{Timeout: config.Duration(cfg.HTTP.Timeout, 10*time.Second)},
-	}
-}
+// func NewHTTPPublisher(cfg config.NotifyConfig) *HTTPPublisher {
+// 	return &HTTPPublisher{
+// 		url:    cfg.HTTP.URL,
+// 		secret: cfg.HTTP.Secret,
+// 		client: &http.Client{Timeout: config.Duration(cfg.HTTP.Timeout, 10*time.Second)},
+// 	}
+// }
 
 func (p *HTTPPublisher) Name() string { return "http" }
 
@@ -199,7 +199,7 @@ type MerchantPublisher struct {
 
 func NewMerchantPublisher(cfg config.NotifyConfig) *MerchantPublisher {
 	return &MerchantPublisher{
-		client: &http.Client{Timeout: config.Duration(cfg.HTTP.Timeout, 10*time.Second)},
+		client: &http.Client{Timeout: config.Duration("10s", 10*time.Second)},
 	}
 }
 
@@ -240,13 +240,16 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 	req.Header.Set("X-Merchant-Id", event.MerchantID)
 	resp, err := p.client.Do(req)
 	if err != nil {
+		logrus.Error("发送失败1,err:", err)
 		return err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
+		logrus.Error("发送失败2,err:", err)
 		return fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(raw), 120))
 	}
+	logrus.Error("订单发送成功,err:", event.Account, event.Payload)
 	return nil
 }
 

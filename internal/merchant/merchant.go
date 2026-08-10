@@ -62,7 +62,7 @@ func GetEnabled(ctx context.Context, merchantID string) (*model.Merchant, error)
 
 // Account is the unique wallet account: the merchant id plus the merchant's own
 // user id. Two merchants may use the same uid without colliding.
-func Account(merchantID, uid string) string {
+func MakeAccount(merchantID, uid string) string {
 	return merchantID + "_" + uid
 }
 

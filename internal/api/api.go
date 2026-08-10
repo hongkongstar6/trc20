@@ -230,7 +230,7 @@ func (s *Server) createAddress(c *gin.Context) {
 		//return
 	}
 
-	account := merchant.Account(merchantID, uid)
+	account := merchant.MakeAccount(merchantID, uid)
 	var existing model.UserWallet
 	err = store.MyStore.DB.WithContext(c).
 		Where("account = ? AND chain = ? AND purpose = ?", account, "TRON", "deposit").
@@ -299,7 +299,8 @@ func (s *Server) createAddress(c *gin.Context) {
 
 type createWithdrawRequest struct {
 	BizOrderNo string `json:"biz_order_no" binding:"required"`
-	UID        int64  `json:"uid" binding:"required"`
+	Uid        string `json:"uid" binding:"required"`
+	MerchantId string `json:"merchant_id" binding:"required"`
 	Symbol     string `json:"symbol" binding:"required"`
 	ToAddress  string `json:"to_address" binding:"required"`
 	Amount     string `json:"amount" binding:"required"` // minimum units
@@ -334,7 +335,8 @@ func (s *Server) createWithdraw(c *gin.Context) {
 	}
 	row := model.WithdrawRecord{
 		BizOrderNo:  req.BizOrderNo,
-		UID:         req.UID,
+		Account:     merchant.MakeAccount(req.MerchantId, req.Uid),
+		MerchantID:  req.MerchantId,
 		Chain:       "TRON",
 		Symbol:      token.Symbol,
 		Contract:    token.Contract,

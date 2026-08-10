@@ -272,12 +272,12 @@ type ProviderTopupConf struct {
 
 type NotifyConfig struct {
 	// Outbox delivery: http callback and/or rocketmq.
-	HTTP struct {
-		Enabled bool   `yaml:"enabled"`
-		URL     string `yaml:"url"`
-		Secret  string `yaml:"secret"`
-		Timeout string `yaml:"timeout"`
-	} `yaml:"http"`
+	// HTTP struct {
+	// 	Enabled bool   `yaml:"enabled"`
+	// 	URL     string `yaml:"url"`
+	// 	Secret  string `yaml:"secret"`
+	// 	Timeout string `yaml:"timeout"`
+	// } `yaml:"http"`
 	RocketMQ struct {
 		Enabled    bool     `yaml:"enabled"`
 		NameServer []string `yaml:"name_server"`

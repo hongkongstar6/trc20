@@ -217,9 +217,9 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 		return "destination is an internal wallet address"
 	}
 
-	// if err := store.IsInternalWallet(ctx, row, &internal); err == nil && internal > 0 {
-	// 	return "destination is an internal wallet address"
-	// }
+	if err := store.IsInternalWallet(ctx, row, &internal); err == nil && internal > 0 {
+		return "destination is an internal wallet address"
+	}
 
 	amount, ok := new(big.Int).SetString(row.AmountUnits, 10)
 	if !ok || amount.Sign() <= 0 {

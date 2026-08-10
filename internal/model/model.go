@@ -122,6 +122,7 @@ func (DepositRecord) TableName() string { return "deposit_record" }
 
 // WithdrawRecord holds one business withdrawal order. biz_order_no is unique,
 // which is what guarantees "at most one on-chain transfer per business order".
+// 提现订单
 type WithdrawRecord struct {
 	ID          int64  `gorm:"primaryKey" json:"id"`
 	BizOrderNo  string `gorm:"size:64;uniqueIndex" json:"biz_order_no"`

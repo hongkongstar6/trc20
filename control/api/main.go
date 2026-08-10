@@ -32,7 +32,14 @@ func main() {
 	// The merchant publisher is always on: a deposit is notified to the
 	// callback URL of the merchant owning the address.
 	publishers := []outbox.Publisher{outbox.NewMerchantPublisher(config.Cfg.Notify)}
-	if config.Cfg.Notify.HTTP.Enabled {
+	// The platform wide http callback is optional: without a configured
+	// NOTIFY_URL there is no endpoint to post to, and keeping the publisher on
+	// would only fill notify_outbox.last_error with connection refused.
+	switch {
+	case !config.Cfg.Notify.HTTP.Enabled:
+	case config.Cfg.Notify.HTTP.URL == "":
+		logrus.Warn("notify.http enabled but url is empty (NOTIFY_URL unset), platform callback disabled")
+	default:
 		publishers = append(publishers, outbox.NewHTTPPublisher(config.Cfg.Notify))
 	}
 	if config.Cfg.Notify.RocketMQ.Enabled {

@@ -95,6 +95,11 @@ services:
       <<: *env
       TZ: Asia/Shanghai
     ports: ["8080:8080"]
+    # outbox 回调（NOTIFY_URL / merchant.callback_url）可能指向宿主机上的业务系统。
+    # Docker Desktop 自带 host.docker.internal，Linux 上的 Docker Engine 没有，
+    # 这条映射让两边行为一致。宿主机服务需监听 0.0.0.0 而不是 127.0.0.1。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on: #api 会连接 rocketmq 发布 outbox 事件
       mysql: {condition: service_healthy}
       rocketmq-namesrv: {condition: service_started}

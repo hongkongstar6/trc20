@@ -76,13 +76,17 @@ func (d *Dispatcher) drainOnce(ctx context.Context) (int, error) {
 }
 
 func (d *Dispatcher) deliver(ctx context.Context, row *model.NotifyOutbox) {
-	var lastErr error
+	// Every publisher is attempted even when one of them is down: a business
+	// system that is offline must not stop the merchant callback or the mq
+	// stream. A retry replays all channels, which downstream deduplicates by
+	// event_id.
+	var errs []error
 	for _, p := range d.publishers {
 		if err := p.Publish(ctx, row); err != nil {
-			lastErr = fmt.Errorf("%s: %w", p.Name(), err)
-			break
+			errs = append(errs, fmt.Errorf("%s: %w", p.Name(), err))
 		}
 	}
+	lastErr := errors.Join(errs...)
 	now := time.Now()
 	if lastErr == nil {
 		store.MyStore.DB.WithContext(ctx).Model(&model.NotifyOutbox{}).Where("id = ?", row.ID).
@@ -155,6 +159,9 @@ func NewHTTPPublisher(cfg config.NotifyConfig) *HTTPPublisher {
 func (p *HTTPPublisher) Name() string { return "http" }
 
 func (p *HTTPPublisher) Publish(ctx context.Context, event *model.NotifyOutbox) error {
+	if p.url == "" {
+		return nil
+	}
 	body := []byte(event.Payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(body))
 	if err != nil {

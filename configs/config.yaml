@@ -204,7 +204,10 @@ energy:
 notify:
     http:
         enabled: true
-        url: "${NOTIFY_URL:-http://127.0.0.1:9000/wallet/callback}"
+        # 业务系统的统一回调地址。留空表示不做平台级回调，只按商户
+        # merchant.callback_url 推送；填错或服务未启动会在 notify_outbox.last_error
+        # 里看到 connection refused。容器内访问宿主机服务用 host.docker.internal。
+        url: "${NOTIFY_URL}"
         secret: "${NOTIFY_SECRET}"
         timeout: 10s
     rocketmq:

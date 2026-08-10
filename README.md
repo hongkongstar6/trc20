@@ -248,6 +248,35 @@ GET  /internal/bloom/stats    # 地址数、容量、bit 数、hash 数、当前
 `sign`，商户按相同规则验签即可。商户被关闭或未配置回调地址时跳过该商户投递，
 事件仍可通过 `/v1/deposits`、`/v1/events` 对账。
 
+平台级回调地址由 `NOTIFY_URL`（`notify.http.url`）配置，留空即关闭，只按商户
+`callback_url` 推送。各发布器互相独立：其中一个失败不再阻断其余通道，失败的
+事件按退避重投。
+
+### notify_outbox.last_error: connection refused
+
+```
+http: Post "http://host.docker.internal:9000/wallet/callback":
+dial tcp 192.168.65.254:9000: connect: connection refused
+```
+
+这不是钱包侧的 bug：`http` 发布器把事件 POST 到 `NOTIFY_URL`，而该地址上没有
+服务在监听。逐项排查：
+
+1. 业务系统的回调服务确实在跑，并监听宿主机 9000 端口：
+   `curl -i http://127.0.0.1:9000/wallet/callback`。
+2. 服务要绑定 `0.0.0.0`（绑 `127.0.0.1` 时容器访问不到）。
+3. Linux 的 Docker Engine 默认没有 `host.docker.internal`，compose 里已用
+   `extra_hosts: host.docker.internal:host-gateway` 补上；自定义部署需自行加。
+4. 暂时没有业务回调服务时，把 `.env` 里的 `NOTIFY_URL` 留空，平台级回调会被
+   跳过，商户回调与 RocketMQ 不受影响。
+
+修好之后 `pending` 的事件会自动重投；已经进死信（`dead`）的行重置后重投：
+
+```sql
+UPDATE notify_outbox SET status = 'pending', retry_count = 0, next_retry = NOW(), last_error = ''
+WHERE status = 'dead';
+```
+
 ## 开发
 
 ```bash

@@ -10,7 +10,7 @@ env: prod
 network: mainnet
 
 log:
-    level: info
+    level: debug
     log_dir: "./log" #日志路径
 
 mysql_server:

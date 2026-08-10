@@ -99,13 +99,13 @@ func frame(pc uintptr) (string, int) {
 	return f.File, f.Line
 }
 
-func logrusLevel(l slog.Level) logrus.Level {
+func logrusLevel(level slog.Level) logrus.Level {
 	switch {
-	case l <= slog.LevelDebug:
+	case level <= slog.LevelDebug:
 		return logrus.DebugLevel
-	case l < slog.LevelWarn:
+	case level < slog.LevelWarn:
 		return logrus.InfoLevel
-	case l < slog.LevelError:
+	case level < slog.LevelError:
 		return logrus.WarnLevel
 	default:
 		return logrus.ErrorLevel

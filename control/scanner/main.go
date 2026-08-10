@@ -22,8 +22,7 @@ func main() {
 	defer stop()
 
 	pwd, _ := os.Getwd()
-	logrus.Println("scanner 当前工作目录:", pwd)
-
+	logrus.Debug("scanner 当前工作目录2:", pwd)
 	// The api process pushes every newly allocated address to this port, so a
 	// deposit to a brand new address is matched from the next block on.
 	go func() {

@@ -153,7 +153,7 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 		if fetched[i].err != nil {
 			return false, fmt.Errorf("block %d: %w", num, fetched[i].err)
 		}
-		logrus.Debug("当前区块读取成功：", num)
+		logrus.Debug("当前区块读取成功:", num)
 
 		block := fetched[i].block
 		if cursor.BlockHash != "" && block.BlockHeader.RawData.ParentHash != "" &&
@@ -162,22 +162,22 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 			logrus.Warn("reorg detected,block:", num, ",parent:", block.BlockHeader.RawData.ParentHash, ",cursor_hash:", cursor.BlockHash)
 			newCursor, err := s.handleReorg(ctx, num)
 			if err != nil {
-				logrus.Debug("退出区块，err：", err)
+				logrus.Debug("退出区块,err:", err)
 				return false, fmt.Errorf("reorg: %w", err)
 			}
 			cursor = newCursor
-			logrus.Debug("退出区块：", num)
+			logrus.Debug("退出区块:", num)
 			return true, nil // restart from the rolled back cursor
 		}
 		//扫描区块数据，提取出转账事件，写入数据库
 		if err := s.scanBlock(ctx, block, fetched[i].infos); err != nil {
-			logrus.Debug("扫描区块：", num, "err:", err)
+			logrus.Debug("扫描区块:", num, "err:", err)
 			return false, fmt.Errorf("scan block %d: %w", num, err)
 		}
 		cursor.BlockNumber = block.Number()
 		cursor.BlockHash = block.BlockID
 		if err := saveCursor(ctx, cursor); err != nil {
-			logrus.Debug("保存区块：", num, "err:", err)
+			logrus.Debug("保存区块:", num, "err:", err)
 			return false, err
 		}
 	}
@@ -331,8 +331,7 @@ func (s *Scanner) scanBlock(ctx context.Context, block *chain.Block, infos []cha
 			}
 		}
 	}
-
-	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	transFunc := func(tx *gorm.DB) error {
 		snapshot := model.BlockSnapshot{
 			BlockNumber: block.Number(),
 			BlockHash:   block.BlockID,
@@ -349,7 +348,8 @@ func (s *Scanner) scanBlock(ctx context.Context, block *chain.Block, infos []cha
 			}
 		}
 		return nil
-	})
+	}
+	return store.MyStore.DB.WithContext(ctx).Transaction(transFunc)
 }
 
 // transfer is a decoded TRC20 Transfer log from an allowlisted contract.
@@ -473,6 +473,7 @@ func (s *Scanner) confirmUpTo(ctx context.Context, head int64) error {
 		Where("status = ? AND block_number <= ?", model.DepositStatePending, limit).
 		Order("id asc").Limit(500).Find(&pending).Error
 	if err != nil {
+
 		return err
 	}
 	for i := range pending {

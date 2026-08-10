@@ -248,9 +248,10 @@ GET  /internal/bloom/stats    # 地址数、容量、bit 数、hash 数、当前
 `sign`，商户按相同规则验签即可。商户被关闭或未配置回调地址时跳过该商户投递，
 事件仍可通过 `/v1/deposits`、`/v1/events` 对账。
 
-平台级回调地址由 `NOTIFY_URL`（`notify.http.url`）配置，留空即关闭，只按商户
-`callback_url` 推送。各发布器互相独立：其中一个失败不再阻断其余通道，失败的
-事件按退避重投。
+充值到账通知的默认通道就是商户回调：scanner 确认到账时把 `merchant_id` 一起写进
+`notify_outbox`，分发器据此查 `merchant.callback_url` 投递，无需额外配置。平台级
+统一回调（`notify.http`，地址取 `NOTIFY_URL`）是可选的，默认关闭。各发布器互相
+独立：其中一个失败不再阻断其余通道，失败的事件按退避重投。
 
 ### notify_outbox.last_error: connection refused
 
@@ -267,8 +268,8 @@ dial tcp 192.168.65.254:9000: connect: connection refused
 2. 服务要绑定 `0.0.0.0`（绑 `127.0.0.1` 时容器访问不到）。
 3. Linux 的 Docker Engine 默认没有 `host.docker.internal`，compose 里已用
    `extra_hosts: host.docker.internal:host-gateway` 补上；自定义部署需自行加。
-4. 暂时没有业务回调服务时，把 `.env` 里的 `NOTIFY_URL` 留空，平台级回调会被
-   跳过，商户回调与 RocketMQ 不受影响。
+4. 只用商户回调（推荐）时保持 `notify.http.enabled: false` / `NOTIFY_URL` 留空，
+   平台级回调会被跳过，商户回调与 RocketMQ 不受影响。
 
 修好之后 `pending` 的事件会自动重投；已经进死信（`dead`）的行重置后重投：
 

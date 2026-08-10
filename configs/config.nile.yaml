@@ -195,9 +195,11 @@ energy:
         deposit_address: "${TRONENERGYRENT_DEPOSIT_ADDRESS:-}"
 
 notify:
+  # 充值到账按 merchant_id 投递到 merchant.callback_url，该发布器始终开启。
   http:
-    enabled: true
-    url: "${NOTIFY_URL:-http://127.0.0.1:9000/wallet/callback}"
+    # 可选的平台级统一回调，默认关闭，见 configs/config.yaml 的说明。
+    enabled: false
+    url: "${NOTIFY_URL}"
     secret: "${NOTIFY_SECRET}"
     timeout: 10s
   rocketmq:

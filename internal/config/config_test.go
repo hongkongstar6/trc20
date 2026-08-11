@@ -71,6 +71,19 @@ func TestLoadAppliesSafeDefaults(t *testing.T) {
 	}
 }
 
+// Cfg starts out nil in every process, so Load has to build the Config itself
+// and publish it; decoding into the nil global panicked inside yaml instead.
+func TestLoadPopulatesTheNilGlobal(t *testing.T) {
+	Cfg = nil
+	cfg, err := Load(writeConfig(t, minimalConfig))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg == nil || Cfg != cfg {
+		t.Fatalf("Cfg = %p, want the returned config %p", Cfg, cfg)
+	}
+}
+
 // The tokens allowlist decides which contract logs can be a deposit at all: an
 // empty one makes the scanner drop every transfer on chain without any error,
 // so a config section that no struct field maps to must fail at startup.

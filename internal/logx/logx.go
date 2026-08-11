@@ -44,13 +44,17 @@ func InitLogrus(cfg config.LogConfig, name string) {
 	// every record into a writer error.
 	//var out io.Writer = os.Stdout
 	out := []io.Writer{}
-	
-	if config.Cfg.Log.Output_File {
+	if cfg.FileEnabled() {
 		if dir := strings.TrimSpace(cfg.LogDir); dir != "" {
 			out = append(out, fileWriter(dir, name))
 		}
 	}
-	if cfg.Output_Console {
+	if cfg.ConsoleEnabled() {
+		out = append(out, os.Stdout)
+	}
+	// Neither sink configured would discard every record, so stdout stays the
+	// fallback.
+	if len(out) == 0 {
 		out = append(out, os.Stdout)
 	}
 	fileAndStdoutWriter := io.MultiWriter(out...)

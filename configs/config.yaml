@@ -86,10 +86,10 @@ wallet:
           enabled: true
     # 系统地址：withdraw 需要 hot_wallet 的 address+path，sweep 需要 finance_wallet
     hot_wallet:
-        address: "${HOT_WALLET_ADDRESS}"
+        address: "${HOT_WALLET_ADDRESS}" #提现付款地址
         path: "m/44'/195'/1'/0/0"
     finance_wallet:
-        address: "${FINANCE_WALLET_ADDRESS}"
+        address: "${FINANCE_WALLET_ADDRESS}" #归集收款地址
         path: "m/44'/195'/2'/0/0"
     gas_account:
         address: "${GAS_ACCOUNT_ADDRESS}"
@@ -183,7 +183,7 @@ energy:
         batch_txs: 10
         max_batch_txs: 30
         period: 1h
-    auto_topup:
+    auto_topup: #自动充值
         enabled: false
         source_address: "${GAS_ACCOUNT_ADDRESS}"
         gas_account:
@@ -199,7 +199,7 @@ energy:
                 max_daily_topup_count: 3
                 # Hard whitelist. The address returned by the provider API is compared
                 # against this value before every transfer.
-                deposit_address: "https://openapi.gasstation.ai" #"${GASSTATION_DEPOSIT_ADDRESS}"
+                deposit_address_url: "https://openapi.gasstation.ai" #"${GASSTATION_DEPOSIT_ADDRESS}"
             tronenergyrent:
                 enabled: true
                 low_watermark_trx: 2000
@@ -207,7 +207,7 @@ energy:
                 max_single_topup_trx: 4000
                 max_daily_topup_trx: 8000
                 max_daily_topup_count: 3
-                deposit_address: "https://tronenergyrent.com" #"${TRONENERGYRENT_DEPOSIT_ADDRESS}"
+                deposit_address_url: "https://tronenergyrent.com" #"${TRONENERGYRENT_DEPOSIT_ADDRESS}"
 
 notify:
     # 充值到账通知走商户回调：事件按 merchant_id 投递到 merchant.callback_url，

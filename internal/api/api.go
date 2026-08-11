@@ -78,15 +78,15 @@ func (s *Server) requestLogger() gin.HandlerFunc {
 }
 
 func maxBodyBytes() int64 {
-	if config.Cfg.API.MaxBodyBytes <= 0 {
+	if config.Cfg.APIServer.MaxBodyBytes <= 0 {
 		return 1 << 20
 	}
-	return config.Cfg.API.MaxBodyBytes
+	return config.Cfg.APIServer.MaxBodyBytes
 }
 
 func (s *Server) ipAllowlist() gin.HandlerFunc {
 	allowed := map[string]bool{}
-	for _, ip := range config.Cfg.API.AllowedIPs {
+	for _, ip := range config.Cfg.APIServer.AllowedIPs {
 		allowed[ip] = true
 	}
 	return func(c *gin.Context) {
@@ -104,11 +104,11 @@ func (s *Server) ipAllowlist() gin.HandlerFunc {
 
 // authenticate verifies HMAC(timestamp + body) and rejects replays.
 func (s *Server) authenticate() gin.HandlerFunc {
-	skew := config.Duration(config.Cfg.API.SignatureSkew, 5*time.Minute)
-	nonceTTL := config.Duration(config.Cfg.API.NonceTTL, 10*time.Minute)
+	skew := config.Duration(config.Cfg.APIServer.SignatureSkew, 5*time.Minute)
+	nonceTTL := config.Duration(config.Cfg.APIServer.NonceTTL, 10*time.Minute)
 	maxBody := maxBodyBytes()
 	return func(c *gin.Context) {
-		if config.Cfg.API.HMACSecret == "" {
+		if config.Cfg.APIServer.HMACSecret == "" {
 			c.Next()
 			return
 		}
@@ -127,7 +127,7 @@ func (s *Server) authenticate() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "stale timestamp"})
 			return
 		}
-		expected := outbox.Sign(config.Cfg.API.HMACSecret, ts, body)
+		expected := outbox.Sign(config.Cfg.APIServer.HMACSecret, ts, body)
 		if !hmac.Equal([]byte(expected), []byte(sig)) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "bad signature"})
 			return

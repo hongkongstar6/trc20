@@ -133,15 +133,15 @@ func callerOf(c *gin.Context) string {
 // the allowlists cannot drift away from what the workers are configured to do.
 func PolicyFromConfig() Policy {
 	policy := Policy{
-		TopupWhitelist:    map[string]string{},
+		TopupWhitelist:    map[string]string{}, //白名单
 		AllowedContracts:  map[string]bool{},
 		GasAccountAddress: config.Cfg.Energy.AutoTopup.SourceAddress,
 		SweepDestination:  config.Cfg.Wallet.FinanceWallet.Address,
 		WithdrawFrom:      config.Cfg.Wallet.HotWallet.Address,
 	}
 	for name, conf := range config.Cfg.Energy.AutoTopup.Providers {
-		if conf.DepositAddress != "" {
-			policy.TopupWhitelist[name] = conf.DepositAddress
+		if conf.DepositAddressUrl != "" {
+			policy.TopupWhitelist[name] = conf.DepositAddressUrl
 		}
 		if cap := int64(conf.MaxSingleTopupTRX * 1e6); cap > policy.TopupMaxSun {
 			policy.TopupMaxSun = cap

@@ -57,8 +57,8 @@ func TestLoadSourcesDotEnvNextToConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MySQL.DSN != "user:pass@tcp(127.0.0.1:3306)/wallet" {
-		t.Fatalf("dsn = %q", cfg.MySQL.DSN)
+	if cfg.MySQLCf.DSN != "user:pass@tcp(127.0.0.1:3306)/wallet" {
+		t.Fatalf("dsn = %q", cfg.MySQLCf.DSN)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestLoadHonorsEnvFileOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MySQL.DSN != "from-custom" {
-		t.Fatalf("dsn = %q", cfg.MySQL.DSN)
+	if cfg.MySQLCf.DSN != "from-custom" {
+		t.Fatalf("dsn = %q", cfg.MySQLCf.DSN)
 	}
 }

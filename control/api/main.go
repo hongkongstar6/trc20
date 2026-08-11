@@ -63,8 +63,8 @@ func main() {
 	}()
 
 	r := api.New(signClient).Router()
-	logrus.Info("wallet-api listening", "addr", config.Cfg.API.Listen)
-	if err := r.Run(config.Cfg.API.Listen); err != nil {
+	logrus.Info("wallet-api listening", "addr", config.Cfg.APIServer.Listen)
+	if err := r.Run(config.Cfg.APIServer.Listen); err != nil {
 		logrus.Error("http server stopped", ",err:", err)
 	}
 }

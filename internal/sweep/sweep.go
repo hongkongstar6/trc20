@@ -55,12 +55,12 @@ func New(gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pricer *en
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if !config.Cfg.Sweep.Enabled {
+	if !config.Cfg.SweepServer.Enabled {
 		s.log.Info("sweep disabled")
 		<-ctx.Done()
 		return nil
 	}
-	interval := config.Duration(config.Cfg.Sweep.Interval, 5*time.Minute)
+	interval := config.Duration(config.Cfg.SweepServer.Interval, 5*time.Minute)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -82,7 +82,7 @@ func (s *Service) round(ctx context.Context) error {
 		return err
 	}
 	minUnits := s.minSweepUnits()
-	maxSkips := config.Cfg.Sweep.Threshold.MaxSkipRounds
+	maxSkips := config.Cfg.SweepServer.Threshold.MaxSkipRounds
 	for _, addr := range candidates {
 		balance, err := s.tokenBalance(ctx, addr.Address)
 		if err != nil {
@@ -143,7 +143,7 @@ func (s *Service) candidates(ctx context.Context) ([]model.UserWallet, error) {
 	err := store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
 		Distinct("to_address").
 		Where("status = ? AND swept = ? AND internal = ?", model.DepositStateConfirmed, false, false).
-		Limit(config.Cfg.Sweep.MaxPerRound).Pluck("to_address", &addresses).Error
+		Limit(config.Cfg.SweepServer.MaxPerRound).Pluck("to_address", &addresses).Error
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +170,7 @@ func (s *Service) minSweepUnits() *big.Int {
 
 // isStale allows dust to be swept eventually so it cannot pile up forever.
 func (s *Service) isStale(ctx context.Context, address string) bool {
-	days := config.Cfg.Sweep.Threshold.StaleDays
+	days := config.Cfg.SweepServer.Threshold.StaleDays
 	if days <= 0 {
 		return false
 	}
@@ -200,10 +200,17 @@ func (s *Service) tokenBalance(ctx context.Context, address string) (*big.Int, e
 	return value, nil
 }
 
+// 1.查发起方 USDT 余额、查波场实时能量单价/租金
+// 2.向第三方便宜平台租赁能量和宽带
+// 3.构建未签名交易对象
+// 4.本地私钥签名
+// 5.广播交易
+// 6.确认交易
+
 // sweepOne performs the full sweep for a single address under a lock so two
 // workers can never spend the same balance twice.
 func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount *big.Int) error {
-	unlock, ok := store.MyStore.Lock(ctx, "sweep:"+wallet.Address, config.Duration(config.Cfg.Sweep.LockTTL, 10*time.Minute))
+	unlock, ok := store.MyStore.Lock(ctx, "sweep:"+wallet.Address, config.Duration(config.Cfg.SweepServer.LockTTL, 10*time.Minute))
 	if !ok {
 		return nil
 	}
@@ -222,7 +229,8 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	}
 
 	finance := config.Cfg.Wallet.FinanceWallet.Address
-	data, err := tron.EncodeTRC20Transfer(finance, amount)
+	data, err := tron.EncodeTRC20Transfer(finance, amount) //构建一个智能合约函数
+
 	if err != nil {
 		return err
 	}
@@ -239,10 +247,13 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	}
 
 	// Build and sign first: a rental starts expiring the moment it is granted.
-	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, s.token.Contract, data, config.Cfg.Sweep.FeeLimitSun)
+	//第3步： 请求节点组装一个未签名的智能合约字节码编译以及区块链的实时状态数据
+	//交易对象(智能合约):组装一笔"触发已有 USDT 合约"的指令数据,并检查余额是否够
+	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, s.token.Contract, data, config.Cfg.SweepServer.FeeLimitSun)
 	if err != nil {
 		return s.failSweep(ctx, record, err)
 	}
+	//第4步：调用签名服务,用私钥签名
 	signed, err := s.sign.Sign(ctx, &signer.SignRequest{
 		Purpose: signer.PurposeSweep,
 		Path:    wallet.DerivePath,
@@ -278,7 +289,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 		"cost_trx":     order.CostTRX,
 		"updated_at":   time.Now(),
 	})
-
+	//第5步骤 广播
 	res, err := s.gw.Broadcast(ctx, signed.Tx)
 	if err != nil {
 		store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{

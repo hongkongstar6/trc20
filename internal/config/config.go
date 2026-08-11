@@ -24,21 +24,21 @@ var Cfg = &Config{}
 // Config is the root configuration for every entrypoint of the monorepo.
 // Every service reads the same file and only uses the sections it needs.
 type Config struct {
-	Env      string         `yaml:"env"`
-	Network  string         `yaml:"network"` // mainnet | nile
-	Log      LogConfig      `yaml:"log"`
-	MySQL    MySQLConfig    `yaml:"mysql_server"`
-	Redis    RedisConfig    `yaml:"redis_server"`
-	API      APIConfig      `yaml:"api_server"`
-	Sign     SignConfig     `yaml:"sign_server"`
-	Wallet   WalletConfig   `yaml:"wallet"`
-	Sweep    SweepConfig    `yaml:"sweep_server"`
-	Bloom    BloomConfig    `yaml:"scanner_server"`
-	Chain    ChainConfig    `yaml:"chain"`
-	Deposit  DepositConfig  `yaml:"deposit"`
-	Withdraw WithdrawConfig `yaml:"withdraw_server"`
-	Energy   EnergyConfig   `yaml:"energy"`
-	Notify   NotifyConfig   `yaml:"notify"`
+	Env            string         `yaml:"env"`
+	Network        string         `yaml:"network"` // mainnet | nile
+	Log            LogConfig      `yaml:"log"`
+	MySQLCf        MySQLConfig    `yaml:"mysql_server"`
+	RedisCf        RedisConfig    `yaml:"redis_server"`
+	APIServer      APIConfig      `yaml:"api_server"`
+	SignServer     SignConfig     `yaml:"sign_server"`
+	Wallet         WalletConfig   `yaml:"wallet"`
+	SweepServer    SweepConfig    `yaml:"sweep_server"`
+	Bloom          BloomConfig    `yaml:"scanner_server"`
+	Chain          ChainConfig    `yaml:"chain"`
+	Deposit        DepositConfig  `yaml:"deposit"`
+	WithdrawServer WithdrawConfig `yaml:"withdraw_server"`
+	Energy         EnergyConfig   `yaml:"energy"`
+	Notify         NotifyConfig   `yaml:"notify"`
 }
 
 // BloomConfig sizes the in-memory bloom filter holding every deposit address.
@@ -282,7 +282,7 @@ type ProviderTopupConf struct {
 	MaxDailyTopupCount int     `yaml:"max_daily_topup_count"`
 	// DepositAddress is the hard whitelist. The provider reported address is
 	// re-fetched before every transfer and must match this value.
-	DepositAddress string `yaml:"deposit_address"`
+	DepositAddressUrl string `yaml:"deposit_address_url"`
 }
 
 type NotifyConfig struct {
@@ -538,14 +538,14 @@ func (c *Config) applyDefaults() {
 	if c.Notify.MaxRetry <= 0 {
 		c.Notify.MaxRetry = 10
 	}
-	if c.Sweep.Threshold.TargetCostRatio <= 0 {
-		c.Sweep.Threshold.TargetCostRatio = 0.005
+	if c.SweepServer.Threshold.TargetCostRatio <= 0 {
+		c.SweepServer.Threshold.TargetCostRatio = 0.005
 	}
-	if c.Sweep.Threshold.SafetyMultiple <= 0 {
-		c.Sweep.Threshold.SafetyMultiple = 20
+	if c.SweepServer.Threshold.SafetyMultiple <= 0 {
+		c.SweepServer.Threshold.SafetyMultiple = 20
 	}
-	if c.Sweep.MaxPerRound <= 0 {
-		c.Sweep.MaxPerRound = 50
+	if c.SweepServer.MaxPerRound <= 0 {
+		c.SweepServer.MaxPerRound = 50
 	}
 	if c.Bloom.ExpectedAddresses <= 0 {
 		c.Bloom.ExpectedAddresses = 200000
@@ -559,7 +559,7 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) validate() error {
-	if c.MySQL.DSN == "" {
+	if c.MySQLCf.DSN == "" {
 		return fmt.Errorf("mysql.dsn is required")
 	}
 	enabled := 0
@@ -597,7 +597,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("energy.auto_topup.source_address is required when auto topup is enabled")
 		}
 		for name, p := range c.Energy.AutoTopup.Providers {
-			if p.Enabled && p.DepositAddress == "" {
+			if p.Enabled && p.DepositAddressUrl == "" {
 				return fmt.Errorf("energy.auto_topup.providers.%s.deposit_address is required", name)
 			}
 		}

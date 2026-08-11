@@ -31,7 +31,7 @@ type Store struct {
 var MyStore *Store
 
 func Open() (*Store, error) {
-	a := mysql.Open(config.Cfg.MySQL.DSN)
+	a := mysql.Open(config.Cfg.MySQLCf.DSN)
 
 	gdb, err := gorm.Open(a, &gorm.Config{
 		// "record not found" is an expected outcome for most lookups here, so
@@ -43,27 +43,27 @@ func Open() (*Store, error) {
 		}),
 	})
 	if err != nil {
-		logrus.Error("mysql连接错误:", config.Cfg.MySQL.DSN, ",err:", err)
+		logrus.Error("mysql连接错误:", config.Cfg.MySQLCf.DSN, ",err:", err)
 		return nil, fmt.Errorf("store: open mysql: %w", err)
 	}
 	sqlDB, err := gdb.DB()
 	if err != nil {
 		return nil, err
 	}
-	if config.Cfg.MySQL.MaxOpenConns > 0 {
-		sqlDB.SetMaxOpenConns(config.Cfg.MySQL.MaxOpenConns)
+	if config.Cfg.MySQLCf.MaxOpenConns > 0 {
+		sqlDB.SetMaxOpenConns(config.Cfg.MySQLCf.MaxOpenConns)
 	}
-	if config.Cfg.MySQL.MaxIdleConns > 0 {
-		sqlDB.SetMaxIdleConns(config.Cfg.MySQL.MaxIdleConns)
+	if config.Cfg.MySQLCf.MaxIdleConns > 0 {
+		sqlDB.SetMaxIdleConns(config.Cfg.MySQLCf.MaxIdleConns)
 	}
-	sqlDB.SetConnMaxLifetime(config.Duration(config.Cfg.MySQL.ConnMaxLifetime, time.Hour))
+	sqlDB.SetConnMaxLifetime(config.Duration(config.Cfg.MySQLCf.ConnMaxLifetime, time.Hour))
 
-	s := &Store{DB: gdb, prefix: config.Cfg.Redis.Prefix}
-	if config.Cfg.Redis.Addr != "" {
+	s := &Store{DB: gdb, prefix: config.Cfg.RedisCf.Prefix}
+	if config.Cfg.RedisCf.Addr != "" {
 		s.Redis = redis.NewClient(&redis.Options{
-			Addr:     config.Cfg.Redis.Addr,
-			Password: config.Cfg.Redis.Password,
-			DB:       config.Cfg.Redis.DB,
+			Addr:     config.Cfg.RedisCf.Addr,
+			Password: config.Cfg.RedisCf.Password,
+			DB:       config.Cfg.RedisCf.DB,
 		})
 	}
 	if s.prefix == "" {

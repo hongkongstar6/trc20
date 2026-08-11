@@ -41,7 +41,7 @@ func main() {
 		logrus.Error("energy manager init failed ", ",err:", err)
 		return
 	}
-	pricer := energy.NewPricer(config.Cfg.Sweep.Threshold, config.Cfg.Energy, mgr, app.Gateway, nil)
+	pricer := energy.NewPricer(config.Cfg.SweepServer.Threshold, config.Cfg.Energy, mgr, app.Gateway, nil)
 	go func() {
 		if err := pricer.Run(ctx); err != nil {
 			logrus.Error("pricer stopped", ",err:", err)

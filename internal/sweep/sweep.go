@@ -96,6 +96,12 @@ func (s *Service) round(ctx context.Context) error {
 			continue
 		}
 		if balance.Sign() <= 0 {
+			// Nothing left on chain: a previous sweep already moved the funds but
+			// its deposits were not all marked, so the address would stay a
+			// candidate forever. Close them out here.
+			if err := s.markSweptEmpty(ctx, addr.Address); err != nil {
+				s.log.Error("marking deposits of an emptied address failed", "address", addr.Address, ",err:", err)
+			}
 			continue
 		}
 		// Above the threshold the very first round already sweeps; below it the
@@ -235,19 +241,39 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 		return nil
 	}
 
+	// A retry after OUT_OF_ENERGY needs more head room than the first attempt,
+	// and an address that keeps failing must stop burning fees.
+	attempts, err := s.energyFailures(ctx, wallet.Address)
+	if err != nil {
+		return err
+	}
+	if budget := s.maxEnergyRetries(); attempts >= budget {
+		s.log.Error("address exceeded the OUT_OF_ENERGY retry budget, manual handling required",
+			"address", wallet.Address, "attempts", attempts, "max_retries", budget)
+		return nil
+	}
+
 	finance := config.Cfg.Wallet.FinanceWallet.Address
 	data, err := tron.EncodeTRC20Transfer(finance, amount) //构建一个智能合约函数
 
 	if err != nil {
 		return err
 	}
+	// Only the deposits that exist now are covered by this sweep; one that
+	// confirms while it is in flight keeps its unswept flag.
+	depositMaxID, err := s.maxUnsweptDepositID(ctx, wallet.Address)
+	if err != nil {
+		return err
+	}
 	record := &model.SweepRecord{
-		FromAddress: wallet.Address,
-		ToAddress:   finance,
-		Symbol:      s.token.Symbol,
-		Contract:    s.token.Contract,
-		AmountUnits: amount.String(),
-		Status:      model.SweepStateCreated,
+		FromAddress:  wallet.Address,
+		ToAddress:    finance,
+		Symbol:       s.token.Symbol,
+		Contract:     s.token.Contract,
+		AmountUnits:  amount.String(),
+		Status:       model.SweepStateCreated,
+		RetryCount:   attempts,
+		DepositMaxID: depositMaxID,
 	}
 	if err := store.MyStore.DB.WithContext(ctx).Create(record).Error; err != nil {
 		return err
@@ -255,16 +281,17 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 
 	//第2步：只读预执行估算能量。triggerconstantcontract 不校验发起地址的能量/TRX,
 	//也不返回带 expiration 的交易,所以它可以安全地排在租赁之前
-	need, err := s.mgr.EstimateEnergy(ctx, wallet.Address, s.token.Contract, data)
+	factor := energy.RetrySafetyFactor(attempts)
+	need, err := s.mgr.EstimateEnergyFactor(ctx, wallet.Address, s.token.Contract, data, factor)
 	if err != nil {
 		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, ",err:", err)
-		need = config.Cfg.Energy.EnergyPerTxNew
+		need = int64(float64(config.Cfg.Energy.EnergyPerTxNew) * factor)
 	}
 	//第3步：按估算值租赁能量并等委托到账
 	requestID := fmt.Sprintf("sweep-%d", record.ID)
 	order, err := s.mgr.Acquire(ctx, "sweep", wallet.Address, need, requestID)
 	if err != nil {
-		return s.failSweep(ctx, record, fmt.Errorf("energy: %w", err))
+		return s.failSweep(ctx, record, FailCodeEnergyRental, fmt.Errorf("energy: %w", err))
 	}
 	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
 		"status":       model.SweepStateEnergyOK,
@@ -278,7 +305,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	//交易对象(智能合约):组装一笔"触发已有 USDT 合约"的指令数据,并检查余额是否够
 	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, s.token.Contract, data, config.Cfg.SweepServer.FeeLimitSun)
 	if err != nil {
-		return s.failSweep(ctx, record, err)
+		return s.failSweep(ctx, record, chain.FailValidate, err)
 	}
 	//第5步：调用签名服务,用私钥签名
 	signed, err := s.sign.Sign(ctx, &signer.SignRequest{
@@ -293,7 +320,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 		},
 	})
 	if err != nil {
-		return s.failSweep(ctx, record, err)
+		return s.failSweep(ctx, record, chain.FailSignature, err)
 	}
 	expiry := time.Now().Add(time.Duration(s.expirationSeconds()) * time.Second)
 	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
@@ -303,8 +330,19 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	//第6步骤 广播
 	res, err := s.gw.Broadcast(ctx, signed.Tx)
 	if err != nil {
+		// A node that rejected the transaction for a permanent reason will never
+		// accept these bytes, so the row is failed now instead of being
+		// rebroadcast every round until it expires.
+		failCode, permanent := chain.FailNode, false
+		if res != nil {
+			failCode, permanent = chain.ClassifyBroadcast(res.Code, res.Message)
+		}
+		if permanent {
+			return s.failSweep(ctx, record, failCode, err)
+		}
 		store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
-			"status": model.SweepStateBroadcast, "fail_reason": truncate(err.Error(), 240), "updated_at": time.Now(),
+			"status": model.SweepStateBroadcast, "fail_reason": truncate(err.Error(), 240),
+			"fail_code": failCode, "updated_at": time.Now(),
 		})
 		return err
 	}
@@ -317,11 +355,72 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	return nil
 }
 
-func (s *Service) failSweep(ctx context.Context, record *model.SweepRecord, cause error) error {
+func (s *Service) failSweep(ctx context.Context, record *model.SweepRecord, failCode string, cause error) error {
 	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
-		"status": model.SweepStateFailed, "fail_reason": truncate(cause.Error(), 240), "updated_at": time.Now(),
+		"status": model.SweepStateFailed, "fail_reason": truncate(cause.Error(), 240),
+		"fail_code": failCode, "updated_at": time.Now(),
 	})
 	return cause
+}
+
+// FailCodeEnergyRental marks a sweep that never reached the chain because no
+// provider could deliver the energy; nothing was signed or broadcast.
+const FailCodeEnergyRental = "energy_rental"
+
+// energyFailures counts the consecutive OUT_OF_ENERGY failures of an address
+// since its last confirmed sweep, which is the retry attempt number.
+func (s *Service) energyFailures(ctx context.Context, address string) (int, error) {
+	var lastConfirmed model.SweepRecord
+	err := store.MyStore.DB.WithContext(ctx).
+		Where("from_address = ? AND status = ?", address, model.SweepStateConfirmed).
+		Order("id desc").Take(&lastConfirmed).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	var count int64
+	err = store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).
+		Where("from_address = ? AND status = ? AND fail_code = ? AND id > ?",
+			address, model.SweepStateFailed, chain.FailOutOfEnergy, lastConfirmed.ID).
+		Count(&count).Error
+	return int(count), err
+}
+
+func (s *Service) maxEnergyRetries() int {
+	if config.Cfg.SweepServer.MaxEnergyRetries > 0 {
+		return config.Cfg.SweepServer.MaxEnergyRetries
+	}
+	return 3
+}
+
+// maxUnsweptDepositID is the highest deposit id the current balance can come
+// from. Deposits confirmed after this point are settled by a later sweep.
+func (s *Service) maxUnsweptDepositID(ctx context.Context, address string) (int64, error) {
+	var maxID *int64
+	err := store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
+		Where("to_address = ? AND status = ? AND swept = ?", address, model.DepositStateConfirmed, false).
+		Select("MAX(id)").Scan(&maxID).Error
+	if err != nil || maxID == nil {
+		return 0, err
+	}
+	return *maxID, nil
+}
+
+// markSweptEmpty closes out the deposits of an address whose on-chain balance is
+// zero. It only applies once a sweep of that address confirmed, so a balance
+// that never arrived is not written off.
+func (s *Service) markSweptEmpty(ctx context.Context, address string) error {
+	var swept int64
+	if err := store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).
+		Where("from_address = ? AND status = ?", address, model.SweepStateConfirmed).
+		Count(&swept).Error; err != nil {
+		return err
+	}
+	if swept == 0 {
+		return nil
+	}
+	return store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
+		Where("to_address = ? AND status = ? AND swept = ?", address, model.DepositStateConfirmed, false).
+		UpdateColumns(map[string]any{"swept": true, "updated_at": time.Now()}).Error
 }
 
 // Reconcile confirms broadcast sweeps and marks the underlying deposits swept.
@@ -351,10 +450,26 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			continue
 		}
 		if !info.Succeeded() {
+			failCode := chain.ClassifyReceipt(info)
+			reason := info.Receipt.Result
+			if reason == "" {
+				reason = info.ResMessage
+			}
 			store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).Where("id = ?", row.ID).
 				UpdateColumns(map[string]any{
-					"status": model.SweepStateFailed, "fail_reason": info.Receipt.Result, "updated_at": now,
+					"status": model.SweepStateFailed, "fail_reason": truncate(reason, 240),
+					"fail_code": failCode, "updated_at": now,
 				})
+			// OUT_OF_ENERGY leaves the USDT untouched, so the next round retries the
+			// address with more head room; anything else repeats identically and is
+			// only worth an operator's attention.
+			if failCode == chain.FailOutOfEnergy {
+				s.log.Warn("sweep ran out of energy, retrying with more head room",
+					"address", row.FromAddress, "txid", row.TxID, "attempt", row.RetryCount+1)
+			} else {
+				s.log.Error("sweep failed on chain", "address", row.FromAddress,
+					"txid", row.TxID, "fail_code", failCode, "reason", reason)
+			}
 			continue
 		}
 		err = store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -369,9 +484,15 @@ func (s *Service) Reconcile(ctx context.Context) error {
 				}).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&model.DepositRecord{}).
-				Where("to_address = ? AND status = ? AND swept = ?", row.FromAddress, model.DepositStateConfirmed, false).
-				UpdateColumns(map[string]any{"swept": true, "updated_at": now}).Error; err != nil {
+			// Only the deposits this sweep actually covered are written off. A
+			// deposit that confirmed while the sweep was in flight keeps its
+			// unswept flag and is picked up by the next round.
+			deposits := tx.Model(&model.DepositRecord{}).
+				Where("to_address = ? AND status = ? AND swept = ?", row.FromAddress, model.DepositStateConfirmed, false)
+			if row.DepositMaxID > 0 {
+				deposits = deposits.Where("id <= ?", row.DepositMaxID)
+			}
+			if err := deposits.UpdateColumns(map[string]any{"swept": true, "updated_at": now}).Error; err != nil {
 				return err
 			}
 			return tx.Where("address = ?", row.FromAddress).Delete(&model.SweepSkip{}).Error
@@ -401,6 +522,7 @@ func (s *Service) settleAbsent(ctx context.Context, row model.SweepRecord, now t
 		UpdateColumns(map[string]any{
 			"status":      model.SweepStateFailed,
 			"fail_reason": "transaction expired without inclusion",
+			"fail_code":   chain.FailExpired,
 			"updated_at":  now,
 		}).Error
 }
@@ -430,7 +552,17 @@ func (s *Service) rebroadcast(ctx context.Context, row model.SweepRecord) error 
 	if signed.TxID != row.TxID {
 		return fmt.Errorf("sweep: refusing to rebroadcast, txid changed from %s to %s", row.TxID, signed.TxID)
 	}
-	_, err = s.gw.Broadcast(ctx, signed.Tx)
+	res, err := s.gw.Broadcast(ctx, signed.Tx)
+	if err == nil {
+		return nil
+	}
+	// Retrying a permanent rejection every round until the transaction expires
+	// only delays the fresh attempt the balance needs.
+	if res != nil {
+		if failCode, permanent := chain.ClassifyBroadcast(res.Code, res.Message); permanent {
+			return s.failSweep(ctx, &row, failCode, err)
+		}
+	}
 	return err
 }
 

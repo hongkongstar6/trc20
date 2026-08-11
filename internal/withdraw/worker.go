@@ -23,6 +23,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// FailCodeRejected marks an order the wallet refused before signing anything;
+// it never touched the chain.
+const FailCodeRejected = "risk_rejected"
+
 type Worker struct {
 	//cfg  *config.Config
 	//st   *store.Store
@@ -175,21 +179,38 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	if res.RowsAffected == 0 {
 		return nil // another worker took it
 	}
-	return w.broadcast(ctx, row.ID, signed.TxID, signed.Tx)
+	row.TxID, row.SignedRaw, row.FromAddress = signed.TxID, signed.Tx.RawDataHex, hot.Address
+	return w.broadcast(ctx, row, signed.TxID, signed.Tx)
 }
 
-func (w *Worker) broadcast(ctx context.Context, id int64, txid string, tx *tron.Transaction) error {
+func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid string, tx *tron.Transaction) error {
+	id := row.ID
 	result, err := w.gw.Broadcast(ctx, tx)
 	now := time.Now()
 	if err != nil {
-		// A broadcast error is not a failed withdrawal: the transaction may
-		// already be propagating. Move to broadcast and let reconciliation
+		failCode, permanent := chain.FailNode, false
+		if result != nil {
+			failCode, permanent = chain.ClassifyBroadcast(result.Code, result.Message)
+		}
+		if permanent {
+			// These bytes will never be accepted, so the order is settled now and
+			// the business system can refund without waiting out the expiration.
+			row.TxID, row.FailCode = txid, failCode
+			if ferr := w.finish(ctx, *row, model.WithdrawStateFailed,
+				"broadcast rejected: "+err.Error(), failCode, 0, 0, now); ferr != nil {
+				return ferr
+			}
+			return err
+		}
+		// A transient broadcast error is not a failed withdrawal: the transaction
+		// may already be propagating. Move to broadcast and let reconciliation
 		// decide based on the txid.
 		store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 			Where("id = ? AND status = ?", id, model.WithdrawStateSigned).
 			UpdateColumns(map[string]any{
 				"status": model.WithdrawStateBroadcast, "broadcast_at": now,
-				"fail_reason": truncate(err.Error(), 240), "updated_at": now,
+				"fail_reason": truncate(err.Error(), 240), "fail_code": failCode,
+				"updated_at": now,
 			})
 		return err
 	}
@@ -197,7 +218,7 @@ func (w *Worker) broadcast(ctx context.Context, id int64, txid string, tx *tron.
 		Where("id = ? AND status = ?", id, model.WithdrawStateSigned).
 		UpdateColumns(map[string]any{
 			"status": model.WithdrawStateBroadcast, "txid": result.TxID,
-			"broadcast_at": now, "fail_reason": "", "updated_at": now,
+			"broadcast_at": now, "fail_reason": "", "fail_code": "", "updated_at": now,
 		})
 	if w.pool != nil {
 		w.pool.RecordUsage(1)
@@ -260,12 +281,14 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) (stri
 
 func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason string) error {
 	now := time.Now()
+	row.FailCode = FailCodeRejected
 	return store.MyStore.DB.WithContext(ctx).Transaction(
 		func(tx *gorm.DB) error {
 			res := tx.Model(&model.WithdrawRecord{}).
 				Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
 				UpdateColumns(map[string]any{
-					"status": model.WithdrawStateRejected, "fail_reason": reason, "updated_at": now,
+					"status": model.WithdrawStateRejected, "fail_reason": reason,
+					"fail_code": FailCodeRejected, "updated_at": now,
 				})
 			if res.Error != nil || res.RowsAffected == 0 {
 				return res.Error
@@ -319,20 +342,27 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		}
 		// Expired and absent from the chain: it can never be included now, so
 		// the order is failed and the business system refunds the user.
-		return w.finish(ctx, row, model.WithdrawStateFailed, "transaction expired without inclusion", 0, 0, now)
+		return w.finish(ctx, row, model.WithdrawStateFailed, "transaction expired without inclusion",
+			chain.FailExpired, 0, 0, now)
 	}
 	if !info.Succeeded() {
 		reason := info.Receipt.Result
 		if reason == "" {
 			reason = info.ResMessage
 		}
+		failCode := chain.ClassifyReceipt(info)
+		// The USDT never left the hot wallet, so the order is reported failed and
+		// the business system refunds; withdrawals are never retried on chain
+		// because a second transfer could double pay one business order.
+		logrus.Error("withdraw failed on chain", "biz_order_no", row.BizOrderNo,
+			"txid", row.TxID, "fail_code", failCode, "reason", reason)
 		return w.finish(ctx, row, model.WithdrawStateFailed, "on-chain failure: "+reason,
-			info.Receipt.EnergyUsageTotal, info.Fee, now)
+			failCode, info.Receipt.EnergyUsageTotal, info.Fee, now)
 	}
 	if head-info.BlockNumber < w.confirmBlocks() {
 		return nil
 	}
-	return w.finish(ctx, row, model.WithdrawStateConfirmed, "", info.Receipt.EnergyUsageTotal, info.Fee, now)
+	return w.finish(ctx, row, model.WithdrawStateConfirmed, "", "", info.Receipt.EnergyUsageTotal, info.Fee, now)
 }
 
 func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) error {
@@ -356,15 +386,30 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 	if signed.TxID != row.TxID {
 		return fmt.Errorf("withdraw: refusing to rebroadcast, txid changed from %s to %s", row.TxID, signed.TxID)
 	}
-	_, err = w.gw.Broadcast(ctx, signed.Tx)
+	res, err := w.gw.Broadcast(ctx, signed.Tx)
+	if err == nil {
+		return nil
+	}
+	// A permanent rejection cannot become valid, so the order is settled now
+	// instead of being rebroadcast every round until it expires.
+	if res != nil {
+		if failCode, permanent := chain.ClassifyBroadcast(res.Code, res.Message); permanent {
+			if ferr := w.finish(ctx, row, model.WithdrawStateFailed,
+				"broadcast rejected: "+err.Error(), failCode, 0, 0, time.Now()); ferr != nil {
+				return ferr
+			}
+		}
+	}
 	return err
 }
 
-func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, reason string, energyUsed, fee int64, now time.Time) error {
+func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, reason, failCode string, energyUsed, fee int64, now time.Time) error {
+	row.FailCode = failCode
 	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
 			"status":      status,
 			"fail_reason": truncate(reason, 240),
+			"fail_code":   failCode,
 			"energy_used": energyUsed,
 			"fee_sun":     fee,
 			"updated_at":  now,
@@ -404,7 +449,9 @@ func (w *Worker) event(row *model.WithdrawRecord, outcome, reason string, now ti
 		"txid":         row.TxID,
 		"result":       outcome,
 		"reason":       reason,
-		"finished_at":  now.Unix(),
+		// fail_code lets the business system branch without parsing reason.
+		"fail_code":   row.FailCode,
+		"finished_at": now.Unix(),
 	}
 }
 

@@ -29,6 +29,9 @@ const (
 	EnergyOrderCreated   = "created"
 	EnergyOrderDelegated = "delegated"
 	EnergyOrderFailed    = "failed"
+	// EnergyOrderAbandoned is an order the provider never resolved. It may have
+	// been paid for, so it is reconciled against the provider statement by hand.
+	EnergyOrderAbandoned = "abandoned"
 
 	TopupStateCreated   = "created"
 	TopupStateBroadcast = "broadcast"
@@ -91,7 +94,7 @@ func (WalletIndexAllocator) TableName() string { return "wallet_index_allocator"
 
 // DepositRecord is one TRC20 Transfer log targeting one of our addresses.
 // Uniqueness is (txid, event_index), which is also the downstream event id.
-//光靠游标还不够，因为进程可能在扫到块、但还没保存游标之前就崩溃/重启，导致同一个块被重扫。为此，DepositRecord 表上以 (txid, event_index) 建了唯一索引 uq_tx_event
+// 光靠游标还不够，因为进程可能在扫到块、但还没保存游标之前就崩溃/重启，导致同一个块被重扫。为此，DepositRecord 表上以 (txid, event_index) 建了唯一索引 uq_tx_event
 type DepositRecord struct {
 	ID            int64      `gorm:"primaryKey" json:"id"`
 	MerchantID    string     `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
@@ -137,7 +140,10 @@ type WithdrawRecord struct {
 	Decimals    int    `gorm:"size:32" json:"decimals"`
 	Status      string `gorm:"size:16;index" json:"status"`
 	FailReason  string `gorm:"size:255" json:"fail_reason"`
-	TxID        string `gorm:"column:txid;size:70;index" json:"txid"`
+	// FailCode is the classified reason (chain.Fail*), which is what retry and
+	// alerting branch on; FailReason keeps the raw node message.
+	FailCode string `gorm:"size:32;index" json:"fail_code"`
+	TxID     string `gorm:"column:txid;size:70;index" json:"txid"`
 	// SignedRaw is the exact signed transaction. A retry always rebroadcasts
 	// these bytes; a second transaction is only built after expiration and
 	// only when the txid is provably absent from the chain.
@@ -170,10 +176,18 @@ type SweepRecord struct {
 	CostTRX     float64    `json:"cost_trx"`
 	EnergyUsed  int64      `json:"energy_used"`
 	FailReason  string     `gorm:"size:255" json:"fail_reason"`
-	BroadcastAt *time.Time `json:"broadcast_at"`
-	ConfirmedAt *time.Time `json:"confirmed_at"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	FailCode    string     `gorm:"size:32;index" json:"fail_code"`
+	// RetryCount is how many times this address already failed the same way
+	// before this attempt, which drives the energy safety factor.
+	RetryCount int `gorm:"size:32" json:"retry_count"`
+	// DepositMaxID is the highest deposit_record id this sweep covers. Only
+	// those rows are marked swept, so a deposit that confirms while the sweep is
+	// in flight is not written off with it.
+	DepositMaxID int64      `gorm:"column:deposit_max_id" json:"deposit_max_id"`
+	BroadcastAt  *time.Time `json:"broadcast_at"`
+	ConfirmedAt  *time.Time `json:"confirmed_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 func (SweepRecord) TableName() string { return "sweep_record" }
@@ -207,23 +221,27 @@ func (AddressBlacklist) TableName() string { return "address_blacklist" }
 
 // EnergyRentOrder normalises orders across every rental provider.
 type EnergyRentOrder struct {
-	ID              int64      `gorm:"primaryKey" json:"id"`
-	Provider        string     `gorm:"size:32;index" json:"provider"`
-	RequestID       string     `gorm:"size:64;uniqueIndex" json:"request_id"`
-	ProviderOrderID string     `gorm:"size:64;index" json:"provider_order_id"`
-	ReceiveAddress  string     `gorm:"size:64;index" json:"receive_address"`
-	ResourceType    string     `gorm:"size:16" json:"resource_type"`
-	RequestedEnergy int64      `json:"requested_energy"`
-	DelegatedEnergy int64      `json:"delegated_energy"`
-	Period          string     `gorm:"size:16" json:"period"`
-	CostTRX         float64    `json:"cost_trx"`
-	Status          string     `gorm:"size:16;index" json:"status"`
-	ProviderStatus  string     `gorm:"size:32" json:"provider_status"`
-	DelegateTxID    string     `gorm:"column:delegate_txid;size:70" json:"delegate_txid"`
-	Purpose         string     `gorm:"size:24" json:"purpose"` // sweep | hot_pool
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	FinishedAt      *time.Time `json:"finished_at"`
+	ID              int64  `gorm:"primaryKey" json:"id"`
+	Provider        string `gorm:"size:32;index" json:"provider"`
+	RequestID       string `gorm:"size:64;uniqueIndex" json:"request_id"`
+	ProviderOrderID string `gorm:"size:64;index" json:"provider_order_id"`
+	ReceiveAddress  string `gorm:"size:64;index" json:"receive_address"`
+	ResourceType    string `gorm:"size:16" json:"resource_type"`
+	RequestedEnergy int64  `json:"requested_energy"`
+	DelegatedEnergy int64  `json:"delegated_energy"`
+	// BaselineEnergy is the energy the receiving address could already spend
+	// when the order was placed. The delegation is confirmed against this
+	// baseline instead of the absolute balance.
+	BaselineEnergy int64      `json:"baseline_energy"`
+	Period         string     `gorm:"size:16" json:"period"`
+	CostTRX        float64    `json:"cost_trx"`
+	Status         string     `gorm:"size:16;index" json:"status"`
+	ProviderStatus string     `gorm:"size:32" json:"provider_status"`
+	DelegateTxID   string     `gorm:"column:delegate_txid;size:70" json:"delegate_txid"`
+	Purpose        string     `gorm:"size:24" json:"purpose"` // sweep | hot_pool
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	FinishedAt     *time.Time `json:"finished_at"`
 }
 
 func (EnergyRentOrder) TableName() string { return "energy_rent_order" }
@@ -249,7 +267,7 @@ type TopupRecord struct {
 func (TopupRecord) TableName() string { return "topup_record" }
 
 // ChainCursor is the scanner position. block_hash detects reorgs.
-//游标记录扫描进度,避免重复扫描区块
+// 游标记录扫描进度,避免重复扫描区块
 type ChainCursor struct {
 	Name        string    `gorm:"size:32;primaryKey" json:"name"`
 	BlockNumber int64     `json:"block_number"`
@@ -260,7 +278,7 @@ type ChainCursor struct {
 func (ChainCursor) TableName() string { return "chain_cursor" }
 
 // BlockSnapshot keeps recent block hashes so a fork point can be located.
-//存区块哈希指纹，用于 reorg 检测/回溯分叉点
+// 存区块哈希指纹，用于 reorg 检测/回溯分叉点
 type BlockSnapshot struct {
 	// The block height is the key, so it must not be auto assigned.
 	BlockNumber int64     `gorm:"primaryKey;autoIncrement:false" json:"block_number"`

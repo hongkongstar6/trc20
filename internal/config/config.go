@@ -204,6 +204,11 @@ type SweepConfig struct {
 	Threshold       SweepThresholdConfig `yaml:"threshold"`
 	MaxPerRound     int                  `yaml:"max_per_round"`
 	LockTTL         string               `yaml:"lock_ttl"`
+	// MaxEnergyRetries is how often an address may be retried after an
+	// OUT_OF_ENERGY failure, each time with a higher safety factor. Once it is
+	// exhausted the address is left alone and logged for manual handling, so a
+	// systematically failing address cannot burn fees round after round.
+	MaxEnergyRetries int `yaml:"max_energy_retries"`
 }
 
 // SweepThresholdConfig drives the runtime break-even computation of min_sweep.
@@ -231,16 +236,22 @@ type SweepThresholdConfig struct {
 
 type EnergyConfig struct {
 	// Mode: cheapest | priority | fixed
-	Mode           string                  `yaml:"mode"`
-	Fixed          string                  `yaml:"fixed"`
-	QuoteCacheTTL  string                  `yaml:"quote_cache_ttl"`
-	DefaultPeriod  string                  `yaml:"default_period"`
-	EnergyPerTx    int64                   `yaml:"energy_per_tx"`     // recipient already holds the token
-	EnergyPerTxNew int64                   `yaml:"energy_per_tx_new"` // recipient never held the token
-	WaitTimeout    string                  `yaml:"wait_timeout"`
-	Providers      map[string]ProviderConf `yaml:"providers"`
-	Pool           EnergyPoolConfig        `yaml:"pool"`
-	AutoTopup      AutoTopupConfig         `yaml:"auto_topup"`
+	Mode           string `yaml:"mode"`
+	Fixed          string `yaml:"fixed"`
+	QuoteCacheTTL  string `yaml:"quote_cache_ttl"`
+	DefaultPeriod  string `yaml:"default_period"`
+	EnergyPerTx    int64  `yaml:"energy_per_tx"`     // recipient already holds the token
+	EnergyPerTxNew int64  `yaml:"energy_per_tx_new"` // recipient never held the token
+	WaitTimeout    string `yaml:"wait_timeout"`
+	// ReconcileInterval is how often unresolved rental orders are polled,
+	// PendingGrace how long an order is left alone before that starts, and
+	// PendingTimeout when an unresolved order is abandoned and alerted on.
+	ReconcileInterval string                  `yaml:"reconcile_interval"`
+	PendingGrace      string                  `yaml:"pending_grace"`
+	PendingTimeout    string                  `yaml:"pending_timeout"`
+	Providers         map[string]ProviderConf `yaml:"providers"`
+	Pool              EnergyPoolConfig        `yaml:"pool"`
+	AutoTopup         AutoTopupConfig         `yaml:"auto_topup"`
 }
 
 type ProviderConf struct {

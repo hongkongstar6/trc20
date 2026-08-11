@@ -84,6 +84,13 @@ energy:
   # when every rental fails.
   mode: cheapest
   default_period: 1h
+  # Rental orders are written before the provider is paid, so an order left in
+  # the created state may already have cost money: it is polled every
+  # reconcile_interval after pending_grace and, if it is still unresolved after
+  # pending_timeout, marked abandoned and logged for manual reconciliation.
+  reconcile_interval: 1m
+  pending_grace: 2m
+  pending_timeout: 30m
   providers:
     trx_burn:
       enabled: true

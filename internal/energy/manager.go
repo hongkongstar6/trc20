@@ -156,6 +156,11 @@ func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need in
 	if err != nil {
 		return nil, err
 	}
+	// The energy the address can already spend is the baseline the delegation is
+	// measured against: comparing the absolute amount would accept an address
+	// that was simply topped up before (the hot wallet always is) as delegated
+	// while nothing arrived.
+	baseline := m.availableEnergy(ctx, receiver)
 	provider := m.provs[quote.Provider]
 	row := &model.EnergyRentOrder{
 		Provider:        quote.Provider,
@@ -167,6 +172,7 @@ func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need in
 		CostTRX:         quote.CostTRX,
 		Status:          model.EnergyOrderCreated,
 		Purpose:         purpose,
+		BaselineEnergy:  baseline,
 	}
 	if err := store.MyStore.DB.WithContext(ctx).Create(row).Error; err != nil {
 		// A duplicate request id means this rental was already attempted.
@@ -205,7 +211,7 @@ func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need in
 	})
 	row.ProviderOrderID = order.ProviderOrderID
 
-	final, err := m.wait(ctx, provider, row)
+	final, err := m.wait(ctx, provider, row, baseline)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +222,7 @@ func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need in
 // wait polls the provider (neither platform has a usable callback) and then
 // verifies the delegation on chain, because the provider saying "delegated" is
 // not proof that our address can actually spend the energy.
-func (m *Manager) wait(ctx context.Context, provider Provider, row *model.EnergyRentOrder) (*Order, error) {
+func (m *Manager) wait(ctx context.Context, provider Provider, row *model.EnergyRentOrder, baseline int64) (*Order, error) {
 	timeout := config.Duration(m.cfg.WaitTimeout, 90*time.Second)
 	deadline := time.Now().Add(timeout)
 	pollKey := row.ProviderOrderID
@@ -232,7 +238,7 @@ func (m *Manager) wait(ctx context.Context, provider Provider, row *model.Energy
 			last = order
 			switch order.State {
 			case StateDelegated:
-				if ok, err := m.confirmOnChain(ctx, row.ReceiveAddress, row.RequestedEnergy); err == nil && ok {
+				if ok, err := m.confirmOnChain(ctx, row.ReceiveAddress, baseline, row.RequestedEnergy); err == nil && ok {
 					return order, nil
 				}
 			case StateFailed, StateCancelled:
@@ -255,14 +261,31 @@ func (m *Manager) wait(ctx context.Context, provider Provider, row *model.Energy
 	return nil, fmt.Errorf("energy: timed out waiting for %s order %s (last state %s)", provider.Name(), pollKey, state)
 }
 
-// confirmOnChain checks that the delegated energy is actually usable.
-func (m *Manager) confirmOnChain(ctx context.Context, addr string, need int64) (bool, error) {
+// confirmOnChain checks that the rented energy actually arrived, by comparing
+// against the amount the address could already spend before the order was
+// placed. Anything else would accept pre-existing energy as the delegation.
+func (m *Manager) confirmOnChain(ctx context.Context, addr string, baseline, need int64) (bool, error) {
 	res, err := m.gw.GetAccountResource(ctx, addr)
 	if err != nil {
 		return false, err
 	}
 	// Providers round the delegation, so accept a small shortfall.
-	return res.AvailableEnergy() >= need*95/100, nil
+	return res.AvailableEnergy()-baseline >= need*95/100, nil
+}
+
+// availableEnergy reads the spendable energy of an address. A failed read
+// returns 0, which only makes the delegation check stricter.
+func (m *Manager) availableEnergy(ctx context.Context, addr string) int64 {
+	res, err := m.gw.GetAccountResource(ctx, addr)
+	if err != nil {
+		logrus.Warn("energy baseline read failed, assuming zero", "address", addr, ",err:", err)
+		return 0
+	}
+	available := res.AvailableEnergy()
+	if available < 0 {
+		return 0
+	}
+	return available
 }
 
 func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder, order *Order) {
@@ -294,15 +317,40 @@ func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder,
 // storage slot), and guessing a single value makes those transfers fail with
 // OUT_OF_ENERGY while still paying the fee.
 func (m *Manager) EstimateEnergy(ctx context.Context, owner, contract, data string) (int64, error) {
+	return m.EstimateEnergyFactor(ctx, owner, contract, data, DefaultSafetyFactor)
+}
+
+// DefaultSafetyFactor is the head room added to the estimate for price and slot
+// differences between the estimation and the execution. A retry after
+// OUT_OF_ENERGY raises it, see RetrySafetyFactor.
+const DefaultSafetyFactor = 1.15
+
+// RetrySafetyFactor escalates the head room per consecutive OUT_OF_ENERGY
+// failure of the same address: 1.15, 1.3, 1.5, then capped.
+func RetrySafetyFactor(attempt int) float64 {
+	switch {
+	case attempt <= 0:
+		return DefaultSafetyFactor
+	case attempt == 1:
+		return 1.3
+	default:
+		return 1.5
+	}
+}
+
+// EstimateEnergyFactor is EstimateEnergy with an explicit safety factor.
+func (m *Manager) EstimateEnergyFactor(ctx context.Context, owner, contract, data string, factor float64) (int64, error) {
 	_, used, err := m.gw.TriggerConstantContract(ctx, owner, contract, data)
 	if err != nil {
 		return 0, err
 	}
-	if used <= 0 {
-		return m.cfg.EnergyPerTxNew, nil
+	if factor < 1 {
+		factor = DefaultSafetyFactor
 	}
-	// Head room for price/slot differences between estimation and execution.
-	return used * 115 / 100, nil
+	if used <= 0 {
+		return int64(float64(m.cfg.EnergyPerTxNew) * factor), nil
+	}
+	return int64(float64(used) * factor), nil
 }
 
 // FeeMode renders the value stored on sweep/withdraw rows.
@@ -324,6 +372,109 @@ func PendingOrders(ctx context.Context, db *gorm.DB, olderThan time.Duration) ([
 		return nil, err
 	}
 	return rows, nil
+}
+
+// RunReconcile settles rental orders left in the created state. Acquire writes
+// the row before paying the provider, so a request that timed out (or a process
+// that died mid rental) leaves a row for an order that may well have been paid.
+// Without this loop that money is never accounted for.
+func (m *Manager) RunReconcile(ctx context.Context) error {
+	interval := config.Duration(m.cfg.ReconcileInterval, time.Minute)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := m.ReconcilePending(ctx); err != nil {
+			logrus.Error("energy order reconcile failed", ",err:", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+// ReconcilePending polls every rental order still in the created state and
+// gives it a terminal status. An order that cannot be resolved before
+// energy.pending_timeout is failed and logged as a possible paid-for-nothing
+// rental, which is the only way an operator learns about it.
+func (m *Manager) ReconcilePending(ctx context.Context) error {
+	grace := config.Duration(m.cfg.PendingGrace, 2*time.Minute)
+	rows, err := PendingOrders(ctx, store.MyStore.DB, grace)
+	if err != nil {
+		return err
+	}
+	timeout := config.Duration(m.cfg.PendingTimeout, 30*time.Minute)
+	for i := range rows {
+		row := rows[i]
+		if err := m.reconcileOne(ctx, &row, timeout); err != nil {
+			logrus.Error("energy order reconcile failed", "request_id", row.RequestID, ",err:", err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) reconcileOne(ctx context.Context, row *model.EnergyRentOrder, timeout time.Duration) error {
+	expired := time.Since(row.CreatedAt) > timeout
+	provider, ok := m.provs[row.Provider]
+	if !ok {
+		// The provider was disabled while the order was in flight; there is no
+		// API left to ask, so only the operator can settle it.
+		return m.abandon(ctx, row, "provider disabled", expired)
+	}
+	pollKey := row.ProviderOrderID
+	if provider.Name() == "gasstation" {
+		pollKey = row.RequestID
+	}
+	if pollKey == "" {
+		// Ensure never returned an order id: the provider may still have taken
+		// the money, and nothing identifies the order to ask about.
+		return m.abandon(ctx, row, "no provider order id", expired)
+	}
+	order, err := provider.Poll(ctx, pollKey)
+	if err != nil {
+		return m.abandon(ctx, row, "poll failed: "+err.Error(), expired)
+	}
+	switch order.State {
+	case StateDelegated:
+		// Paid and delivered, only our wait gave up too early. The row is
+		// settled so the cost lands in the rental accounting; the energy itself
+		// may already have expired, which is what the cost report shows.
+		m.markDelegated(ctx, row, order)
+		logrus.Warn("energy order was delegated after the wait timed out",
+			"request_id", row.RequestID, "provider", row.Provider, "cost_trx", row.CostTRX)
+		return nil
+	case StateFailed, StateCancelled:
+		return store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
+			Where("id = ? AND status = ?", row.ID, model.EnergyOrderCreated).
+			UpdateColumns(map[string]any{
+				"status": model.EnergyOrderFailed, "provider_status": order.ProviderState,
+				"finished_at": time.Now(), "updated_at": time.Now(),
+			}).Error
+	}
+	return m.abandon(ctx, row, "still "+order.ProviderState, expired)
+}
+
+// abandon keeps an unresolved order pending until energy.pending_timeout and
+// then fails it with a loud log line: the rental may have been paid for, so it
+// needs a human to reconcile it against the provider statement.
+func (m *Manager) abandon(ctx context.Context, row *model.EnergyRentOrder, reason string, expired bool) error {
+	if !expired {
+		logrus.Warn("energy order still unresolved", "request_id", row.RequestID,
+			"provider", row.Provider, "reason", reason)
+		return nil
+	}
+	logrus.Error("energy order abandoned, verify it against the provider statement",
+		"request_id", row.RequestID, "provider", row.Provider,
+		"provider_order_id", row.ProviderOrderID, "cost_trx", row.CostTRX, "reason", reason)
+	return store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
+		Where("id = ? AND status = ?", row.ID, model.EnergyOrderCreated).
+		UpdateColumns(map[string]any{
+			"status":          model.EnergyOrderAbandoned,
+			"provider_status": truncate(reason, 32),
+			"finished_at":     time.Now(),
+			"updated_at":      time.Now(),
+		}).Error
 }
 
 func truncate(s string, n int) string {

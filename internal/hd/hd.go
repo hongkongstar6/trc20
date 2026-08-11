@@ -22,7 +22,7 @@ const CoinTypeTRON = 195
 
 // Wallet holds the master key derived from the mnemonic seed.
 type Wallet struct {
-	master *hdkeychain.ExtendedKey
+	master *hdkeychain.ExtendedKey //seed 派生出的 BIP32 主密钥
 }
 
 // NewFromMnemonic validates the mnemonic and builds the master key.
@@ -40,6 +40,16 @@ func NewFromMnemonic(mnemonic, passphrase string) (*Wallet, error) {
 		return nil, fmt.Errorf("hd: new master: %w", err)
 	}
 	return &Wallet{master: master}, nil
+}
+
+// DeriveAddress returns the base58check TRON address for a path.
+func (w *Wallet) DeriveAddress(path string) (string, error) {
+	priv, err := w.DerivePrivateKey(path)
+	if err != nil {
+		return "", err
+	}
+	defer priv.Zero()
+	return tron.PubKeyToAddress(priv.PubKey().SerializeUncompressed())
 }
 
 // DerivePrivateKey walks a path such as m/44'/195'/0'/0/12.
@@ -60,16 +70,6 @@ func (w *Wallet) DerivePrivateKey(path string) (*btcec.PrivateKey, error) {
 		return nil, fmt.Errorf("hd: ec priv key: %w", err)
 	}
 	return priv, nil
-}
-
-// DeriveAddress returns the base58check TRON address for a path.
-func (w *Wallet) DeriveAddress(path string) (string, error) {
-	priv, err := w.DerivePrivateKey(path)
-	if err != nil {
-		return "", err
-	}
-	defer priv.Zero()
-	return tron.PubKeyToAddress(priv.PubKey().SerializeUncompressed())
 }
 
 // ParsePath converts a BIP32 path string into child indexes.

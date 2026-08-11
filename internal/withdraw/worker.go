@@ -65,6 +65,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		if err := w.processCreated(ctx); err != nil {
 			logrus.Error("withdraw process failed", ",err:", err)
 		}
+
 		if err := w.Reconcile(ctx); err != nil {
 			logrus.Error("withdraw reconcile failed", ",err:", err)
 		}
@@ -77,7 +78,7 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) processCreated(ctx context.Context) error {
-	var rows []model.WithdrawRecord
+	var rows []model.WithdrawRecord //找出提现订单
 	err := store.MyStore.DB.WithContext(ctx).
 		Where("status = ?", model.WithdrawStateCreated).
 		Order("id asc").Limit(20).Find(&rows).Error
@@ -200,6 +201,7 @@ func (w *Worker) broadcast(ctx context.Context, id int64, txid string, tx *tron.
 
 // riskCheck applies the wallet-side safety limits. Business risk control lives
 // in the business system; this is only the last line of defence.
+// 风险防控
 func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) string {
 	if !tron.IsValidAddress(row.ToAddress) {
 		return "invalid destination address"
@@ -263,8 +265,8 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 	)
 }
 
-// Reconcile settles broadcast withdrawals and notifies the business system
-// exactly once per order.
+// Reconcile settles broadcast withdrawals and notifies the business system exactly once per order.
+// 对账结算广播提款，并按订单向业务系统发送一次通知。
 func (w *Worker) Reconcile(ctx context.Context) error {
 	var rows []model.WithdrawRecord
 	err := store.MyStore.DB.WithContext(ctx).

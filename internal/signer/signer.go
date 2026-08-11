@@ -86,45 +86,6 @@ func New(cfg config.SignConfig, policy Policy, audit AuditSink) (*Service, error
 	return &Service{wallet: w, policy: policy, audit: audit}, nil
 }
 
-// DeriveAddress exposes address derivation so wallet-api can allocate deposit
-// addresses without ever holding the seed.
-// 分配专属地址
-func (s *Service) DeriveAddress(path string) (string, error) {
-	return s.wallet.DeriveAddress(path)
-}
-
-// Sign validates the request against the policy and returns the signed tx.
-// 用私钥对交易内容(转账数据)签名
-func (s *Service) Sign(ctx context.Context, req *SignRequest, caller string) (*SignResponse, error) {
-	reason, err := s.check(req)
-	if err != nil {
-		s.recordAudit(ctx, req, "", caller, false, reason)
-		return nil, err
-	}
-	priv, err := s.wallet.DerivePrivateKey(req.Path)
-	if err != nil {
-		s.recordAudit(ctx, req, "", caller, false, "derive failed")
-		return nil, err
-	}
-	defer priv.Zero()
-
-	addr, err := tron.PubKeyToAddress(priv.PubKey().SerializeUncompressed())
-	if err != nil {
-		return nil, err
-	}
-	if req.Address != "" && addr != req.Address {
-		s.recordAudit(ctx, req, "", caller, false, "path/address mismatch")
-		return nil, fmt.Errorf("signer: derived address %s does not match requested %s", addr, req.Address)
-	}
-	signed, err := tron.SignTransaction(req.Tx, priv)
-	if err != nil {
-		s.recordAudit(ctx, req, "", caller, false, "sign failed")
-		return nil, err
-	}
-	s.recordAudit(ctx, req, signed.TxID, caller, true, "")
-	return &SignResponse{TxID: signed.TxID, Tx: signed}, nil
-}
-
 func (s *Service) recordAudit(ctx context.Context, req *SignRequest, txid, caller string, allowed bool, reason string) {
 	if s.audit == nil {
 		return

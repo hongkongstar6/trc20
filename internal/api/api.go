@@ -344,13 +344,14 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		MerchantID:  req.MerchantId,
 		Chain:       "TRON",
 		Symbol:      token.Symbol,
-		Contract:    token.Contract,
+		Contract:    token.Contract, //智能合约地址
 		ToAddress:   req.ToAddress,
 		AmountUnits: amount.String(),
 		Decimals:    token.Decimals,
 		Status:      model.WithdrawStateCreated,
 		FromAddress: config.Cfg.Wallet.HotWallet.Address,
 	}
+	//提现订单插入数据库后,由withdraw服务 定时从数据库中找出提现订单
 	if err := store.MyStore.DB.WithContext(c).Create(&row).Error; err != nil {
 		// Duplicate submission: return the existing order instead of failing.
 		var existing model.WithdrawRecord

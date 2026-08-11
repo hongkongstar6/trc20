@@ -155,7 +155,7 @@ type TokenConfig struct {
 type WalletConfig struct {
 	// TRON BIP44 coin type is 195.
 	AccountPath string        `yaml:"account_path"` // e.g. m/44'/195'/0'/0
-	Tokens      []TokenConfig `yaml:"tokens"`
+	Tokens      []TokenConfig `yaml:"tokens"`       //
 	// Named system addresses. Their derivation paths are fixed and never
 	// reused by user deposit addresses.
 	HotWallet     NamedAddress `yaml:"hot_wallet"`

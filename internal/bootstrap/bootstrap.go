@@ -36,7 +36,7 @@ type App struct {
 func Init(service string) (*App, error) {
 	path := flag.String("config", envOr("CONFIG_PATH", defaultConfigPath()), "path to the config file")
 
-	migrate := flag.Bool("migrate", false, "run schema auto migration and exit")
+	migrate := flag.Bool("migrate", true, "run schema auto migration and exit")
 	flag.Parse()
 
 	_, err := config.Load(*path) //加载配置

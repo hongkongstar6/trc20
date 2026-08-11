@@ -3,6 +3,7 @@ package signer
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/hongkongstar6/trc20/internal/tron"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,8 +25,8 @@ func InitRouter(r *gin.Engine, svc *Service, token string) {
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
 	v1 := r.Group("/v1", authorize(token))
-	v1.POST("/sign", svc.Sign1)    //用私钥对交易进行签名
-	v1.POST("/derive", svc.Derive) //生成专属地址
+	v1.POST("/sign", svc.Sign1)            //用私钥对交易进行签名
+	v1.POST("/derive", svc.DeriveAddress1) //生成专属地址
 
 }
 
@@ -46,7 +48,39 @@ func (svc *Service) Sign1(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func (svc *Service) Derive(c *gin.Context) {
+// Sign validates the request against the policy and returns the signed tx.
+// 用私钥对交易内容(转账数据)签名
+func (s *Service) Sign(ctx context.Context, req *SignRequest, caller string) (*SignResponse, error) {
+	reason, err := s.check(req)
+	if err != nil {
+		s.recordAudit(ctx, req, "", caller, false, reason)
+		return nil, err
+	}
+	priv, err := s.wallet.DerivePrivateKey(req.Path)
+	if err != nil {
+		s.recordAudit(ctx, req, "", caller, false, "derive failed")
+		return nil, err
+	}
+	defer priv.Zero()
+
+	addr, err := tron.PubKeyToAddress(priv.PubKey().SerializeUncompressed())
+	if err != nil {
+		return nil, err
+	}
+	if req.Address != "" && addr != req.Address {
+		s.recordAudit(ctx, req, "", caller, false, "path/address mismatch")
+		return nil, fmt.Errorf("signer: derived address %s does not match requested %s", addr, req.Address)
+	}
+	signed, err := tron.SignTransaction(req.Tx, priv)
+	if err != nil {
+		s.recordAudit(ctx, req, "", caller, false, "sign failed")
+		return nil, err
+	}
+	s.recordAudit(ctx, req, signed.TxID, caller, true, "")
+	return &SignResponse{TxID: signed.TxID, Tx: signed}, nil
+}
+
+func (svc *Service) DeriveAddress1(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<16)
 	var req struct {
 		Path string `json:"path"`
@@ -62,6 +96,13 @@ func (svc *Service) Derive(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"address": addr, "path": req.Path})
 
+}
+
+// DeriveAddress exposes address derivation so wallet-api can allocate deposit
+// addresses without ever holding the seed.
+// 分配专属地址
+func (s *Service) DeriveAddress(path string) (string, error) {
+	return s.wallet.DeriveAddress(path)
 }
 
 func authorize(token string) gin.HandlerFunc {

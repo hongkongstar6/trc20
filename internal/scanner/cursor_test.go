@@ -98,9 +98,8 @@ func TestCursorOnChain(t *testing.T) {
 // Prefetching is what lets the scanner outrun the chain, but the blocks must
 // still be applied in ascending order or reorg detection breaks.
 func TestFetchRangeKeepsBlockOrder(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Deposit.FetchConcurrency = 8
-	config.Cfg = cfg
+	//cfg := config.Config{}
+	config.Cfg.Deposit.FetchConcurrency = 8
 	s := &Scanner{gw: fakeNodeGateway(t)}
 
 	const from, to = 1000, 1019

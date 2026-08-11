@@ -12,6 +12,8 @@ network: mainnet
 log:
     level: debug
     log_dir: "./log" #日志路径
+    output_console: true #是否输出至控制台
+    output_file: true #是否支持输出至文件
 
 mysql_server:
     # docker compose 注入的 MYSQL_DSN 优先；默认值只在直接跑本机进程时生效。

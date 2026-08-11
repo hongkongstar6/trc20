@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/hongkongstar6/trc20/internal/tron"
+	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 var Cfg *Config
@@ -63,7 +66,10 @@ type LogConfig struct {
 	Level string `yaml:"level"`
 	// LogDir is the directory log files are written to. When empty logs go to
 	// stdout only. Files are rotated daily and named "<service>-YYYY-MM-DD.log".
-	LogDir string `yaml:"log_dir"`
+	LogDir         string `yaml:"log_dir"`
+	Output_Console bool   `yaml:"output_console"` //是否输出至控制台
+	Output_File    bool   `yaml:"output_file"`    //是否支持输出至文件
+
 }
 
 type MySQLConfig struct {
@@ -308,6 +314,31 @@ var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`
 // The yaml is parsed first and the expansion happens on the parsed scalars, so
 // an env value carrying quotes, colons, '#' or newlines can never change the
 // document structure.
+func Load1(path string) (*Config, error) {
+	_ = godotenv.Load(".env")
+
+	// 2. 配置 Viper 读取 YAML
+	viper.SetConfigFile("configs/config.yaml")
+
+	// viper.SetConfigName("config")
+	// viper.SetConfigType("yaml")
+	// viper.AddConfigPath("./config")
+	// 开启环境变量替换功能
+	viper.AutomaticEnv()
+
+	if err := viper.ReadInConfig(); err != nil {
+		log.Fatalf("读取配置文件失败: %v", err)
+	}
+
+	// 核心步骤：告诉 Viper 替换配置文件中的 ${VAR} 占位符
+	// 注意：需要在反序列化或获取值时确保变量已被替换
+	//var config Config
+	if err := viper.Unmarshal(&Cfg); err != nil {
+		log.Fatalf("解析配置失败: %v", err)
+	}
+	return Cfg, nil
+}
+
 func Load(path string) (*Config, error) {
 	if err := loadEnvFileFor(path); err != nil {
 		return nil, fmt.Errorf("load env file: %w", err)
@@ -327,11 +358,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
 	expandEnvNode(&doc)
-	var c Config
-	if err := doc.Decode(&c); err != nil {
+	//var c Config
+	if err := doc.Decode(Cfg); err != nil {
 		return nil, fmt.Errorf("decode config %s: %w", path, err)
 	}
-	Cfg = &c
+	//Cfg = &c
 	Cfg.applyDefaults()
 	if err := Cfg.validate(); err != nil {
 		return nil, err

@@ -39,14 +39,13 @@ func Init(service string) (*App, error) {
 	migrate := flag.Bool("migrate", false, "run schema auto migration and exit")
 	flag.Parse()
 
-	cfg, err := config.Load(*path)
+	_, err := config.Load(*path) //加载配置
 	if err != nil {
 		logrus.Error("load config failed,", ",err:", err)
 		return nil, err
 	}
 	// Assign the loaded config to the global variable
-	logx.InitLogrus(cfg.Log, service)
-	logrus.Infof("Config: %+v", cfg)
+	logx.InitLogrus(config.Cfg.Log, service)
 	st, err := store.Open() //数据库
 	if err != nil {
 		logrus.Error("DB failed,", ",err:", err)
@@ -69,7 +68,7 @@ func Init(service string) (*App, error) {
 			return nil, err
 		}
 	}
-	gw, err := chain.NewGateway(cfg.Chain)
+	gw, err := chain.NewGateway(config.Cfg.Chain)
 	if err != nil {
 		logrus.Error("chain gateway init failed,", ",err:", err)
 		return nil, err

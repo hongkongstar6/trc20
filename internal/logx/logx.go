@@ -42,12 +42,19 @@ func InitLogrus(cfg config.LogConfig, name string) {
 	// An empty log_dir means stdout only; an unwritable directory (a bind mount
 	// owned by another uid, for instance) degrades to stdout instead of turning
 	// every record into a writer error.
-	var out io.Writer = os.Stdout
-	if dir := strings.TrimSpace(cfg.LogDir); dir != "" {
-		out = fileWriter(dir, name)
+	//var out io.Writer = os.Stdout
+	out := []io.Writer{}
+	
+	if config.Cfg.Log.Output_File {
+		if dir := strings.TrimSpace(cfg.LogDir); dir != "" {
+			out = append(out, fileWriter(dir, name))
+		}
 	}
-
-	logrus.SetOutput(out)
+	if cfg.Output_Console {
+		out = append(out, os.Stdout)
+	}
+	fileAndStdoutWriter := io.MultiWriter(out...)
+	logrus.SetOutput(fileAndStdoutWriter)
 	logrus.SetReportCaller(true) //显示行号和函数名
 	logrus.SetFormatter(&formatter{})
 	logrus.SetLevel(logrusLevel(level(cfg.Level)))

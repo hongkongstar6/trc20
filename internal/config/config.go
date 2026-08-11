@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Cfg *Config
+var Cfg = &Config{}
 
 // Config is the root configuration for every entrypoint of the monorepo.
 // Every service reads the same file and only uses the sections it needs.

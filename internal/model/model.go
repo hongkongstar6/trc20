@@ -301,7 +301,7 @@ type NotifyOutbox struct {
 	Account    string     `gorm:"column:account;size:64;index" json:"account"`
 	EventType  string     `gorm:"size:32;index" json:"event_type"`
 	Payload    string     `gorm:"type:text" json:"payload"`
-	Status     string     `gorm:"size:16;index" json:"status"`
+	Status     string     `gorm:"size:16;index" json:"status"` //发送状态
 	RetryCount int        `gorm:"size:32" json:"retry_count"`
 	NextRetry  time.Time  `gorm:"index" json:"next_retry"`
 	LastError  string     `gorm:"size:255" json:"last_error"`

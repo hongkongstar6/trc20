@@ -51,7 +51,7 @@ func Init(service string) (*App, error) {
 		logrus.Error("DB failed,", ",err:", err)
 		return nil, err
 	}
-	if *migrate {
+	if *migrate && service == "api" {
 		if err := st.AutoMigrate(); err != nil {
 			logrus.Error("schema migration failed,", ",err:", err)
 			return nil, err

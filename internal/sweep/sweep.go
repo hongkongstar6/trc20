@@ -323,10 +323,13 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 		return s.failSweep(ctx, record, chain.FailSignature, err)
 	}
 	expiry := time.Now().Add(time.Duration(s.expirationSeconds()) * time.Second)
-	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
-		"txid": signed.TxID, "signed_raw": signed.Tx.RawDataHex,
-		"expired_at": expiry, "updated_at": time.Now(),
-	})
+	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(
+		map[string]any{
+			"txid":       signed.TxID,
+			"signed_raw": signed.Tx.RawDataHex,
+			"expired_at": expiry,
+			"updated_at": time.Now(),
+		})
 	//第6步骤 广播
 	res, err := s.gw.Broadcast(ctx, signed.Tx)
 	if err != nil {

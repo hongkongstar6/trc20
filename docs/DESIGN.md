@@ -288,10 +288,9 @@ min_sweep  = cost_usd / target_cost_ratio      // target_cost_ratio 建议 0.5%
 地址 USDT 余额 ≥ min_sweep（或大额即时触发）
         │  取该地址分布式锁
         ▼
-预估能量：本地 TriggerConstantContract（energy_used × 1.2）为准
+预估能量：只读 TriggerConstantContract（energy_used × 1.15）为准
+        │  （只读预执行不校验发起地址的能量/TRX，也不返回带 expiration 的交易）
         │  （归集收款方=财务地址，**常年留一点 USDT 余额**，能把能量从 131k 压到 65k）
-        ▼
-构造并签好交易（先签名再租，抢租期）
         ▼
 Provider 选路：cheapest 模式下并发报价
    GasStation /price + /estimate   ║   TronEnergyRent /calculate-energy-price
@@ -303,7 +302,9 @@ Provider 选路：cheapest 模式下并发报价
         统一再用链上 GetAccountResource 复核实际到账能量
         │  超时 60~90s 或失败/部分成功 → 降级烧 TRX
         ▼
-广播（feeLimit 硬上限）→ 等确认 → 写 sweep_record（provider / fee_mode / 实际能耗 / 成本）
+能量到账后才 triggersmartcontract 构造未签名交易（此刻起算 expiration ≈ 60s）
+        ▼
+签名 → 立刻广播（feeLimit 硬上限）→ 等确认 → 写 sweep_record（provider / fee_mode / 实际能耗 / 成本）
         ▼
 资源到期自动回收（两家都是到期自动 undelegate，无需我方处理）
 ```
@@ -311,7 +312,7 @@ Provider 选路：cheapest 模式下并发报价
 ### 9.3 必须做的设计取舍（这几条是本节的核心）
 
 1. **能量供给抽象成 Provider 接口**（见 9.0），实现 `gasstation` / `tronenergyrent` / `trx_burn` / `staking`。**Nile 阶段用 `trx_burn`，主网切 `cheapest` 比价**，全部配置切换。不这么做，测试网代码到主网必返工。
-2. **租期与广播必须"抢时间"**：最短档 10 分钟。租到能量后若广播卡住、节点抖动，租金白付。规则：**先把交易构造好、签好名，再下租赁单**，拿到 `status=1` 立刻广播；广播失败快速重试，超 2 分钟未上链则记录「租金浪费」指标并告警。
+2. **构造必须排在租赁之后**：节点在 `triggersmartcontract` 里写入的 `expiration` 只有约 60s，而租赁派发常要几十秒到几分钟，先构造就会等出 `TRANSACTION_EXPIRATION_ERROR`。规则：**只读预执行估能量 → 下租赁单 → 链上确认到账 → 才构造、签名并立刻广播**；租期最短档 10 分钟，广播失败按 txid 定论并在过期前原样重播同一份签名字节，超 2 分钟未上链则记录「租金浪费」指标并告警。
 3. **`request_id` 用我方 `sweep_record.id`**，天然幂等；重复下单返回 `110044` 视为已存在，转查询而非新建。
 4. **回调 + 轮询双保险**：只靠回调会丢（公网、我方发布重启）；只靠轮询浪费且慢。回调接口要幂等、验签/IP 白名单、返回纯文本 `SUCCESS`。
 5. **带宽（Net）单独考虑**：`/estimate` 明确不含带宽。一笔 TRC20 转账约需 345 字节带宽，账户每日有免费带宽额度，通常够 1~2 笔；不够则烧约 0.3~0.4 TRX。策略：**默认让带宽烧 TRX**（金额小），仅在批量归集高峰考虑单独租 net（最小 5000）。

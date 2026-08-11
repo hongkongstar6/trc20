@@ -169,6 +169,30 @@ Nile 上它们完全无法使用；它们在主网上以小额交易进行验证
 余额达标的钱包第一轮就归集，不受 `max_skip_rounds` 影响。跳过次数按地址记在
 `sweep_skip` 表，归集确认后清零，所以下一次小额又要重新累计。
 
+## 归集/提现的转账步骤顺序
+
+节点组装交易时会写入 `expiration`（约 1 分钟），而租赁平台派发能量可能要几十秒到
+几分钟，所以「构建未签名交易」必须排在租赁之后，顺序固定为：
+
+| # | 步骤 | 调用 | 是否带 expiration |
+| --- | --- | --- | --- |
+| 1 | 查 USDT 余额、能量单价与租金报价 | `triggerconstantcontract(balanceOf)` + `getchainparameters` + 平台报价 | 否 |
+| 2 | 预估本次转账需要的能量 | `triggerconstantcontract(transfer)` → `energy_used` | 否 |
+| 3 | 按预估值租赁能量，等委托到账并链上复核 | 平台下单 + `getaccountresource` | 否 |
+| 4 | 构建未签名交易 | `triggersmartcontract` | **是（约 60s）** |
+| 5 | 签名 | sign-service | — |
+| 6 | 广播 | `broadcasttransaction` | — |
+| 7 | 确认与对账 | `gettransactioninfobyid` | — |
+
+第 2 步是只读预执行，不校验发起地址的能量/TRX，`fee_limit` 也不参与，所以「地址还
+没有能量就估不出消耗」不会发生；能驱动租赁数量的是它，而不是第 4 步的构建结果。
+第 4~6 步必须连续执行，`sweep_server.tx_expiration_sec` 与节点的过期时间保持一致：
+已签名但未上链的归集，在过期前由对账原样重播同一份字节（绝不重新构建，否则同一笔
+余额可能被归集两次），过期后置为 `failed`，余额留给下一轮重新租赁并归集。
+
+带宽是烧 TRX 而非租赁：一笔 TRC20 转账约 345 字节，低于任何平台的最小带宽订单量，
+通常由每日免费带宽额度覆盖。
+
 ## 地址黑名单（address_blacklist）
 
 风控黑名单放在数据库表 `address_blacklist`，不再走 `config.yaml`：

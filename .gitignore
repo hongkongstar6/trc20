@@ -8,3 +8,4 @@ configs/config.mainnet*
 *.crt
 log/
 etc/
+go.sum

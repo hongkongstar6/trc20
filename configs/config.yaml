@@ -170,6 +170,8 @@ energy:
     pending_timeout: 30m
     providers:
         # trx_burn 是唯一不需要外部凭据的兜底方式：其他 provider 全部失败时烧 TRX。
+        # 注意：提现（withdraw_server）与热钱包能量池只租不烧，租不到能量会停下来
+        # 告警，不会走这个兜底；trx_burn 只对归集（sweep_server）生效。
         trx_burn:
             enabled: true
         gasstation:

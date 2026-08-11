@@ -21,6 +21,15 @@ import (
 // FeeModeBurn is recorded on transactions that paid by burning TRX.
 const FeeModeBurn = "burn"
 
+// ProviderTRXBurn is the pseudo provider that pays the fee by burning the
+// signer's TRX instead of renting energy.
+const ProviderTRXBurn = "trx_burn"
+
+// ErrBurnNotAllowed is returned when the only usable provider would burn TRX
+// but the caller asked for a real rental. Withdrawals use this so a rental
+// outage stops the flow instead of silently paying the fee in TRX.
+var ErrBurnNotAllowed = errors.New("energy: rental unavailable and burning TRX is not allowed")
+
 // Manager selects a provider, places the rental and waits for delegation.
 // Callers never talk to a provider directly.
 type Manager struct {
@@ -57,6 +66,9 @@ func (m *Manager) BestQuote(ctx context.Context, req QuoteRequest) (*Quote, erro
 		req.Period = m.defaultPeriod()
 	}
 	if m.cfg.Mode == "fixed" {
+		if req.ExcludeBurn && m.cfg.Fixed == ProviderTRXBurn {
+			return nil, ErrBurnNotAllowed
+		}
 		p, ok := m.provs[m.cfg.Fixed]
 		if !ok {
 			return nil, fmt.Errorf("energy: fixed provider %q is not enabled", m.cfg.Fixed)
@@ -65,6 +77,18 @@ func (m *Manager) BestQuote(ctx context.Context, req QuoteRequest) (*Quote, erro
 	}
 
 	names := m.orderedNames()
+	if req.ExcludeBurn {
+		kept := make([]string, 0, len(names))
+		for _, n := range names {
+			if n != ProviderTRXBurn {
+				kept = append(kept, n)
+			}
+		}
+		names = kept
+		if len(names) == 0 {
+			return nil, ErrBurnNotAllowed
+		}
+	}
 	type result struct {
 		quote *Quote
 		err   error
@@ -109,7 +133,7 @@ func (m *Manager) orderedNames() []string {
 		names = append(names, n)
 	}
 	sort.Slice(names, func(i, j int) bool {
-		bi, bj := names[i] == "trx_burn", names[j] == "trx_burn"
+		bi, bj := names[i] == ProviderTRXBurn, names[j] == ProviderTRXBurn
 		if bi != bj {
 			return bj
 		}
@@ -152,7 +176,19 @@ func (m *Manager) defaultPeriod() string {
 // may still have created a paid order. On timeout the row lets us reconcile
 // instead of paying twice.
 func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need int64, requestID string) (*model.EnergyRentOrder, error) {
-	quote, err := m.BestQuote(ctx, QuoteRequest{Resource: ResourceEnergy, Amount: need, Period: m.defaultPeriod(), Receiver: receiver})
+	return m.acquire(ctx, purpose, receiver, need, requestID, false)
+}
+
+// AcquireRented is Acquire without the trx_burn fallback: when no platform can
+// deliver the energy it fails with ErrBurnNotAllowed instead of letting the
+// transaction pay the fee out of the signing address' TRX.
+func (m *Manager) AcquireRented(ctx context.Context, purpose, receiver string, need int64, requestID string) (*model.EnergyRentOrder, error) {
+	return m.acquire(ctx, purpose, receiver, need, requestID, true)
+}
+
+func (m *Manager) acquire(ctx context.Context, purpose, receiver string, need int64, requestID string, excludeBurn bool) (*model.EnergyRentOrder, error) {
+	quote, err := m.BestQuote(ctx, QuoteRequest{Resource: ResourceEnergy, Amount: need,
+		Period: m.defaultPeriod(), Receiver: receiver, ExcludeBurn: excludeBurn})
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +219,7 @@ func (m *Manager) Acquire(ctx context.Context, purpose, receiver string, need in
 			return nil, err
 		}
 	}
-	if quote.Provider == "trx_burn" {
+	if quote.Provider == ProviderTRXBurn {
 		row.Status = model.EnergyOrderDelegated
 		m.markDelegated(ctx, row, &Order{State: StateDelegated, ProviderState: FeeModeBurn})
 		return row, nil
@@ -355,7 +391,7 @@ func (m *Manager) EstimateEnergyFactor(ctx context.Context, owner, contract, dat
 
 // FeeMode renders the value stored on sweep/withdraw rows.
 func FeeMode(provider string) string {
-	if provider == "trx_burn" {
+	if provider == ProviderTRXBurn {
 		return FeeModeBurn
 	}
 	return "rent:" + provider

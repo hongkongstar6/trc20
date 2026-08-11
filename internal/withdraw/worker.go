@@ -27,6 +27,18 @@ import (
 // it never touched the chain.
 const FailCodeRejected = "risk_rejected"
 
+// Halt codes are written on an order that keeps its created state: the wallet
+// stopped before signing and an operator has to act (refill the hot wallet,
+// restore the energy rental) before the order can move on.
+const (
+	FailCodeInsufficientBalance = "hot_wallet_insufficient"
+	FailCodeEnergyRental        = "energy_rental_failed"
+)
+
+// ErrHalted stops the current round for an order without failing it: the order
+// stays created and is picked up again once the alert was acted on.
+var ErrHalted = errors.New("withdraw: halted, manual handling required")
+
 type Worker struct {
 	//cfg  *config.Config
 	//st   *store.Store
@@ -128,6 +140,14 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		return w.reject(ctx, row, "invalid destination")
 	}
 
+	// The hot wallet balance is checked before anything is rented or signed: a
+	// transfer over the balance reverts on chain and still pays the fee, and the
+	// order must not be failed for it either because the money is only missing
+	// until finance refills the wallet.
+	if err := w.checkBalance(ctx, row, hot.Address, amount); err != nil {
+		return err
+	}
+
 	// The recipient's token state decides the energy tier: an address that
 	// never held USDT needs roughly twice the energy, and underestimating
 	// fails the transaction with OUT_OF_ENERGY while still paying the fee.
@@ -136,12 +156,14 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		logrus.Warn("withdraw energy estimate failed, using worst case", ",err:", err)
 		need = config.Cfg.Energy.EnergyPerTxNew
 	}
-	if w.pool != nil && !w.pool.HasEnergyFor(ctx, need) {
+	if w.pool == nil || !w.pool.HasEnergyFor(ctx, need) {
 		requestID := fmt.Sprintf("withdraw-%d", row.ID)
-		if _, err := w.mgr.Acquire(ctx, "hot_pool", hot.Address, need, requestID); err != nil {
-			// Not fatal: the transaction burns TRX instead of stalling.
-			logrus.Error("withdraw energy rental failed, falling back to burning TRX", ",err:", err)
-			return err
+		// Burning TRX is never an acceptable fallback here: it silently drains
+		// the hot wallet's TRX at several times the rental price, so a rental
+		// outage stops the withdrawal and alerts instead.
+		if _, err := w.mgr.AcquireRented(ctx, "withdraw", hot.Address, need, requestID); err != nil {
+			return w.halt(ctx, row, FailCodeEnergyRental,
+				fmt.Sprintf("energy rental failed, withdrawal stopped (no TRX burn fallback): %v", err))
 		}
 	}
 
@@ -226,6 +248,83 @@ func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid 
 	}
 	logrus.Info("withdraw broadcast", "id", id, "txid", txid, "duplicated", result.Duplicated)
 	return nil
+}
+
+// checkBalance verifies the hot wallet still holds enough USDT for this order
+// plus everything already signed or broadcast but not yet confirmed, since
+// those transfers will settle out of the same balance.
+func (w *Worker) checkBalance(ctx context.Context, row *model.WithdrawRecord, from string, amount *big.Int) error {
+	balance, err := w.tokenBalance(ctx, from)
+	if err != nil {
+		// A node error is transient: the order stays created and is retried,
+		// but nothing is signed on an unverified balance.
+		return fmt.Errorf("withdraw: hot wallet balance query failed: %w", err)
+	}
+	inflight, err := w.inflightUnits(ctx, from)
+	if err != nil {
+		return err
+	}
+	needed := new(big.Int).Add(amount, inflight)
+	if balance.Cmp(needed) >= 0 {
+		return nil
+	}
+	return w.halt(ctx, row, FailCodeInsufficientBalance, fmt.Sprintf(
+		"hot wallet USDT balance insufficient: balance=%s required=%s (amount=%s in_flight=%s)",
+		balance.String(), needed.String(), amount.String(), inflight.String()))
+}
+
+// inflightUnits sums the orders already signed or broadcast from the address,
+// whose amounts are still going to leave the wallet.
+func (w *Worker) inflightUnits(ctx context.Context, from string) (*big.Int, error) {
+	var sum string
+	err := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
+		Select("COALESCE(SUM(amount_units),0)").
+		Where("from_address = ? AND status IN ?", from,
+			[]string{model.WithdrawStateSigned, model.WithdrawStateBroadcast}).
+		Scan(&sum).Error
+	if err != nil {
+		return nil, fmt.Errorf("withdraw: sum in-flight withdrawals: %w", err)
+	}
+	units, ok := new(big.Int).SetString(sum, 10)
+	if !ok {
+		return nil, fmt.Errorf("withdraw: cannot parse in-flight sum %q", sum)
+	}
+	return units, nil
+}
+
+func (w *Worker) tokenBalance(ctx context.Context, address string) (*big.Int, error) {
+	data, err := tron.EncodeTRC20BalanceOf(address)
+	if err != nil {
+		return nil, err
+	}
+	out, _, err := w.gw.TriggerConstantContract(ctx, address, w.token.Contract, data)
+	if err != nil {
+		return nil, err
+	}
+	value, ok := tron.ParseUint256(out)
+	if !ok {
+		return nil, fmt.Errorf("withdraw: cannot parse balance %q", out)
+	}
+	return value, nil
+}
+
+// halt records why the order did not move and alerts. The order keeps its
+// created state on purpose: the funds are intact, so once the operator fixed
+// the cause the same order is executed by a later round instead of being
+// failed back to the business system.
+func (w *Worker) halt(ctx context.Context, row *model.WithdrawRecord, failCode, reason string) error {
+	logrus.Error("ALERT withdraw halted", "biz_order_no", row.BizOrderNo,
+		"fail_code", failCode, "reason", reason)
+	if err := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
+		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
+		UpdateColumns(map[string]any{
+			"fail_reason": truncate(reason, 240),
+			"fail_code":   failCode,
+			"updated_at":  time.Now(),
+		}).Error; err != nil {
+		logrus.Error("withdraw halt bookkeeping failed", "biz_order_no", row.BizOrderNo, ",err:", err)
+	}
+	return fmt.Errorf("%w: %s", ErrHalted, reason)
 }
 
 // riskCheck applies the wallet-side safety limits. Business risk control lives

@@ -154,3 +154,44 @@ func TestFeeMode(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+// A withdrawal must never pay the fee in TRX, so excluding the burn fallback
+// has to surface as an error instead of a burn quote.
+func TestBestQuoteExcludeBurnFailsWhenOnlyBurnIsLeft(t *testing.T) {
+	mgr := newTestManager("cheapest", map[string]Provider{
+		"broken":   &fakeProvider{name: "broken", err: errors.New("out of stock")},
+		"trx_burn": &fakeProvider{name: "trx_burn", cost: 3.20, billed: 32000},
+	})
+	_, err := mgr.BestQuote(context.Background(), QuoteRequest{
+		Resource: ResourceEnergy, Amount: 32000, ExcludeBurn: true})
+	if !errors.Is(err, ErrNoProvider) {
+		t.Fatalf("err = %v, want ErrNoProvider", err)
+	}
+}
+
+func TestBestQuoteExcludeBurnPicksRental(t *testing.T) {
+	mgr := newTestManager("cheapest", map[string]Provider{
+		"trx_burn":       &fakeProvider{name: "trx_burn", cost: 0.01, billed: 32000},
+		"tronenergyrent": &fakeProvider{name: "tronenergyrent", cost: 1.69, billed: 32000},
+	})
+	q, err := mgr.BestQuote(context.Background(), QuoteRequest{
+		Resource: ResourceEnergy, Amount: 32000, ExcludeBurn: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Provider != "tronenergyrent" {
+		t.Fatalf("provider = %s, want tronenergyrent", q.Provider)
+	}
+}
+
+func TestFixedBurnModeRejectsExcludeBurn(t *testing.T) {
+	cfg := config.EnergyConfig{Mode: "fixed", Fixed: ProviderTRXBurn, DefaultPeriod: "1h"}
+	mgr := NewManager(cfg, nil, map[string]Provider{
+		"trx_burn": &fakeProvider{name: "trx_burn", cost: 3.2, billed: 32000},
+	})
+	_, err := mgr.BestQuote(context.Background(), QuoteRequest{
+		Resource: ResourceEnergy, Amount: 32000, ExcludeBurn: true})
+	if !errors.Is(err, ErrBurnNotAllowed) {
+		t.Fatalf("err = %v, want ErrBurnNotAllowed", err)
+	}
+}

@@ -53,12 +53,12 @@ func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Ma
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	if !config.Cfg.Withdraw.Enabled {
+	if !config.Cfg.WithdrawServer.Enabled {
 		logrus.Info("withdraw disabled")
 		<-ctx.Done()
 		return nil
 	}
-	interval := config.Duration(config.Cfg.Withdraw.PollInterval, 3*time.Second)
+	interval := config.Duration(config.Cfg.WithdrawServer.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -78,7 +78,8 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) processCreated(ctx context.Context) error {
-	var rows []model.WithdrawRecord //找出提现订单
+	var rows []model.WithdrawRecord
+	//从数据库找出订单状态为"created"的提现订单
 	err := store.MyStore.DB.WithContext(ctx).
 		Where("status = ?", model.WithdrawStateCreated).
 		Order("id asc").Limit(20).Find(&rows).Error
@@ -139,7 +140,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		}
 	}
 
-	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, w.token.Contract, data, config.Cfg.Withdraw.FeeLimitSun)
+	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, w.token.Contract, data, config.Cfg.WithdrawServer.FeeLimitSun)
 	if err != nil {
 		return err
 	}
@@ -237,10 +238,10 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) (stri
 	if !ok || amount.Sign() <= 0 {
 		return "invalid amount", nil
 	}
-	if maxUnits, ok := new(big.Int).SetString(config.Cfg.Withdraw.MaxAmountUnits, 10); ok && maxUnits.Sign() > 0 && amount.Cmp(maxUnits) > 0 {
+	if maxUnits, ok := new(big.Int).SetString(config.Cfg.WithdrawServer.MaxAmountUnits, 10); ok && maxUnits.Sign() > 0 && amount.Cmp(maxUnits) > 0 {
 		return "amount exceeds the single withdrawal limit", nil
 	}
-	if limit, ok := new(big.Int).SetString(config.Cfg.Withdraw.DailyMaxUnits, 10); ok && limit.Sign() > 0 {
+	if limit, ok := new(big.Int).SetString(config.Cfg.WithdrawServer.DailyMaxUnits, 10); ok && limit.Sign() > 0 {
 		var sum string
 		since := time.Now().Truncate(24 * time.Hour)
 		store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
@@ -408,15 +409,15 @@ func (w *Worker) event(row *model.WithdrawRecord, outcome, reason string, now ti
 }
 
 func (w *Worker) confirmBlocks() int64 {
-	if config.Cfg.Withdraw.ConfirmBlocks > 0 {
-		return config.Cfg.Withdraw.ConfirmBlocks
+	if config.Cfg.WithdrawServer.ConfirmBlocks > 0 {
+		return config.Cfg.WithdrawServer.ConfirmBlocks
 	}
 	return config.Cfg.Deposit.Confirmations
 }
 
 func (w *Worker) expirationSeconds() int64 {
-	if config.Cfg.Withdraw.TxExpirationSec > 0 {
-		return config.Cfg.Withdraw.TxExpirationSec
+	if config.Cfg.WithdrawServer.TxExpirationSec > 0 {
+		return config.Cfg.WithdrawServer.TxExpirationSec
 	}
 	return 60
 }

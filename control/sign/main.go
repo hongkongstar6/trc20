@@ -25,18 +25,18 @@ func main() {
 	pwd, _ := os.Getwd()
 	logrus.Println("sign 当前工作目录:", pwd)
 
-	policy := signer.PolicyFromConfig()
-	svc, err := signer.New(config.Cfg.Sign, policy, signer.NewDBAudit())
+	policy := signer.PolicyFromConfig() //从配置中获取派生策略
+	svc, err := signer.New(config.Cfg.SignServer, policy, signer.NewDBAudit())
 	if err != nil {
 		logrus.Error("sign service init failed", ",err:", err)
 		return
 	}
 	r := gin.New()
-	signer.InitRouter(r, svc, config.Cfg.Sign.Token)
-	logrus.Info("sign-service listening", "addr", config.Cfg.Sign.Listen, "mtls", config.Cfg.Sign.TLS.Enabled)
+	signer.InitRouter(r, svc, config.Cfg.SignServer.Token)
+	logrus.Info("sign-service listening", "addr", config.Cfg.SignServer.Listen, "mtls", config.Cfg.SignServer.TLS.Enabled)
 
-	if !config.Cfg.Sign.TLS.Enabled {
-		if err := r.Run(config.Cfg.Sign.Listen); err != nil {
+	if !config.Cfg.SignServer.TLS.Enabled {
+		if err := r.Run(config.Cfg.SignServer.Listen); err != nil {
 			logrus.Error("sign server stopped", ",err:", err)
 		}
 		return
@@ -44,13 +44,13 @@ func main() {
 
 	// mTLS needs a client CA pool, which gin's RunTLS cannot express, so the
 	// engine serves a TLS listener built here instead.
-	tlsCfg, err := serverTLS(config.Cfg.Sign.TLS.CAFile, config.Cfg.Sign.TLS.CertFile, config.Cfg.Sign.TLS.KeyFile)
+	tlsCfg, err := serverTLS(config.Cfg.SignServer.TLS.CAFile, config.Cfg.SignServer.TLS.CertFile, config.Cfg.SignServer.TLS.KeyFile)
 	if err != nil {
 
 		logrus.Error("mTLS setup failed", ",err:", err)
 		return
 	}
-	ln, err := net.Listen("tcp", config.Cfg.Sign.Listen)
+	ln, err := net.Listen("tcp", config.Cfg.SignServer.Listen)
 	if err != nil {
 		logrus.Error("sign listen failed", ",err:", err)
 		return

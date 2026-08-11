@@ -80,19 +80,23 @@ func signRecoverable(digest []byte, priv *btcec.PrivateKey) ([]byte, error) {
 }
 
 // EncodeTRC20Transfer builds the calldata for transfer(address,uint256).
+// 按照波场（TRON）TRC-20 代币合约的标准 ABI（应用二进制接口）规范，
+// 将转账操作的接收方地址和转账金额手动“打包/编码”成一段十六进制的 calldata（调用数据）
+// 这段生成的十六进制字符串，最终会作为智能合约交易的输入数据（Data 字段），
+// 用于触发并执行 TRC-20 代币合约的 transfer(address,uint256) 转账函数
 func EncodeTRC20Transfer(to string, amount *big.Int) (string, error) {
 	raw, err := DecodeAddress(to)
 	if err != nil {
 		return "", fmt.Errorf("encode transfer: %w", err)
 	}
-	selector := Keccak256([]byte("transfer(address,uint256)"))[:4]
+	selector := Keccak256([]byte("transfer(address,uint256)"))[:4] //生成函数选择器
 	param := make([]byte, 64)
 	copy(param[12:32], raw[1:]) // 20-byte address, left padded
 	amtBytes := amount.Bytes()
 	if len(amtBytes) > 32 {
 		return "", errors.New("amount overflows uint256")
 	}
-	copy(param[64-len(amtBytes):], amtBytes)
+	copy(param[64-len(amtBytes):], amtBytes) //编码接收地址参数
 	return hex.EncodeToString(append(selector, param...)), nil
 }
 

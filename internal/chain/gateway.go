@@ -368,6 +368,38 @@ func (g *Gateway) GetTxInfoByID(ctx context.Context, txid string) (*TxInfo, erro
 }
 
 // --------------------------------------------------------------- contract IO
+// 调用接口 https://api.trongrid.io/wallet/triggersmartcontract 返回的完整数据格式
+type TriggerResultDetail struct {
+	Result struct {
+		Result bool `json:"result"`
+	} `json:"result"`
+	EnergyUsed     int      `json:"energy_used"`
+	EnergyPenalty  int      `json:"energy_penalty"`
+	ConstantResult []string `json:"constant_result"`
+	Transaction    struct {
+		Visible bool   `json:"visible"` //
+		TxID    string `json:"txID"`
+		RawData struct {
+			Contract []struct {
+				Parameter struct {
+					Value struct {
+						Data            string `json:"data"`
+						OwnerAddress    string `json:"owner_address"`
+						ContractAddress string `json:"contract_address"`
+					} `json:"value"`
+					TypeURL string `json:"type_url"`
+				} `json:"parameter"`
+				Type string `json:"type"`
+			} `json:"contract"`
+			RefBlockBytes string `json:"ref_block_bytes"`
+			RefBlockHash  string `json:"ref_block_hash"`
+			Expiration    int64  `json:"expiration"`
+			FeeLimit      int    `json:"fee_limit"`
+			Timestamp     int64  `json:"timestamp"`
+		} `json:"raw_data"`
+		RawDataHex string `json:"raw_data_hex"`
+	} `json:"transaction"`
+}
 
 type triggerResult struct {
 	Result struct {
@@ -377,7 +409,7 @@ type triggerResult struct {
 	} `json:"result"`
 	ConstantResult []string          `json:"constant_result"`
 	Transaction    *tron.Transaction `json:"transaction"`
-	EnergyUsed     int64             `json:"energy_used"`
+	EnergyUsed     int64             `json:"energy_used"` //本次交易需要的能量,但是不会显示消耗的带宽量
 }
 
 // TriggerConstantContract performs a read-only contract call and also returns
@@ -413,6 +445,8 @@ func (g *Gateway) TriggerConstantContract(ctx context.Context, owner, contract, 
 
 // BuildTRC20Transfer asks the node to assemble an unsigned transfer. The
 // caller signs it in sign-service; this process never sees a private key.
+// 请求节点组装一个未签名的转账
+// 负责帮你查好最新区块号、打包好复杂的合约指令、评估消耗、并模拟跑一遍看看确认没问题，最后打包成一个标准的Transaction JSON
 func (g *Gateway) BuildTRC20Transfer(ctx context.Context, owner, contract, data string, feeLimit int64) (*tron.Transaction, error) {
 	ownerHex, err := tron.AddressToHex(owner)
 	if err != nil {
@@ -430,6 +464,9 @@ func (g *Gateway) BuildTRC20Transfer(ctx context.Context, owner, contract, data 
 		"fee_limit":        feeLimit,
 		"call_value":       0,
 	}
+	// 在 TRON 网络中，所有与智能合约相关的交互（例如：查询 TRC-20 代币余额、发起 USDT 转账、调用 DApp 合约函数等）
+	// 都可以通过这个接口来完成
+	// 负责帮你查好最新区块号、打包好复杂的合约指令、并模拟跑一遍确认没问题，最后打包成一个标准的 Transaction JSON
 	if err := g.call(ctx, g.walletPath("/triggersmartcontract", false), body, &out); err != nil {
 		return nil, err
 	}

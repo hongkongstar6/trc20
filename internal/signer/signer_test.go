@@ -254,8 +254,8 @@ func TestPolicyFromConfig(t *testing.T) {
 	}
 	cfg.Energy.AutoTopup.SourceAddress = financeAddr
 	cfg.Energy.AutoTopup.Providers = map[string]config.ProviderTopupConf{
-		"gasstation":     {DepositAddress: depositAddr, MaxSingleTopupTRX: 4000},
-		"tronenergyrent": {DepositAddress: outsideAddr, MaxSingleTopupTRX: 1000},
+		"gasstation":     {DepositAddressUrl: depositAddr, MaxSingleTopupTRX: 4000},
+		"tronenergyrent": {DepositAddressUrl: outsideAddr, MaxSingleTopupTRX: 1000},
 	}
 	config.Cfg = cfg
 	policy := PolicyFromConfig()

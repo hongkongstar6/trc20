@@ -141,11 +141,11 @@ chain:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MySQL.DSN != "secret-dsn" {
-		t.Fatalf("dsn = %q, want the environment value", cfg.MySQL.DSN)
+	if cfg.MySQLCf.DSN != "secret-dsn" {
+		t.Fatalf("dsn = %q, want the environment value", cfg.MySQLCf.DSN)
 	}
-	if cfg.Redis.Addr != "127.0.0.1:6379" {
-		t.Fatalf("redis addr = %q, want the inline default", cfg.Redis.Addr)
+	if cfg.RedisCf.Addr != "127.0.0.1:6379" {
+		t.Fatalf("redis addr = %q, want the inline default", cfg.RedisCf.Addr)
 	}
 }
 
@@ -181,8 +181,8 @@ chain:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MySQL.DSN != "user:pass@tcp(127.0.0.1:3306)/wallet" {
-		t.Fatalf("dsn = %q, want the inline default", cfg.MySQL.DSN)
+	if cfg.MySQLCf.DSN != "user:pass@tcp(127.0.0.1:3306)/wallet" {
+		t.Fatalf("dsn = %q, want the inline default", cfg.MySQLCf.DSN)
 	}
 }
 
@@ -320,8 +320,8 @@ chain:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MySQL.DSN != "user:p\"a#ss\nword@tcp(127.0.0.1:3306)/wallet" {
-		t.Fatalf("dsn = %q, want the raw environment value", cfg.MySQL.DSN)
+	if cfg.MySQLCf.DSN != "user:p\"a#ss\nword@tcp(127.0.0.1:3306)/wallet" {
+		t.Fatalf("dsn = %q, want the raw environment value", cfg.MySQLCf.DSN)
 	}
 	if cfg.Chain.Nodes[0].Endpoint != "http://node:8090 # not a comment" {
 		t.Fatalf("endpoint = %q", cfg.Chain.Nodes[0].Endpoint)
@@ -346,8 +346,8 @@ chain:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Redis.DB != 3 {
-		t.Fatalf("redis db = %d, want 3", cfg.Redis.DB)
+	if cfg.RedisCf.DB != 3 {
+		t.Fatalf("redis db = %d, want 3", cfg.RedisCf.DB)
 	}
 	if !cfg.Chain.Nodes[0].Enabled {
 		t.Fatal("node must be enabled")
@@ -376,8 +376,8 @@ func TestShippedConfigHonorsMySQLDSNEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MySQL.DSN != os.Getenv("MYSQL_DSN") {
-		t.Fatalf("mysql dsn = %q, want the MYSQL_DSN value", cfg.MySQL.DSN)
+	if cfg.MySQLCf.DSN != os.Getenv("MYSQL_DSN") {
+		t.Fatalf("mysql dsn = %q, want the MYSQL_DSN value", cfg.MySQLCf.DSN)
 	}
 
 	os.Unsetenv("MYSQL_DSN")
@@ -385,7 +385,7 @@ func TestShippedConfigHonorsMySQLDSNEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load without MYSQL_DSN: %v", err)
 	}
-	if !strings.Contains(cfg.MySQL.DSN, "127.0.0.1:3306") {
-		t.Fatalf("fallback dsn = %q, want the in-file default", cfg.MySQL.DSN)
+	if !strings.Contains(cfg.MySQLCf.DSN, "127.0.0.1:3306") {
+		t.Fatalf("fallback dsn = %q, want the in-file default", cfg.MySQLCf.DSN)
 	}
 }

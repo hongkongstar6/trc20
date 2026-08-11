@@ -116,9 +116,9 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 	defer unlock()
 
 	// The provider reported address must match the configured whitelist.
-	if reportedDeposit != "" && reportedDeposit != conf.DepositAddress {
+	if reportedDeposit != "" && reportedDeposit != conf.DepositAddressUrl {
 		return fmt.Errorf("provider %s reported deposit address %s which is not the whitelisted %s: refusing to transfer",
-			provider, reportedDeposit, conf.DepositAddress)
+			provider, reportedDeposit, conf.DepositAddressUrl)
 	}
 	if err := t.guardPending(ctx, provider); err != nil {
 		return err
@@ -140,7 +140,7 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 		Provider:          provider,
 		RequestID:         requestID,
 		FromAddress:       t.cfg.SourceAddress,
-		ToAddress:         conf.DepositAddress,
+		ToAddress:         conf.DepositAddressUrl,
 		AmountTRX:         amount,
 		TriggerBalanceTRX: balance,
 		Status:            model.TopupStateCreated,
@@ -150,7 +150,7 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 		return err
 	}
 
-	tx, err := t.gw.BuildTRXTransfer(ctx, t.cfg.SourceAddress, conf.DepositAddress, amountSun)
+	tx, err := t.gw.BuildTRXTransfer(ctx, t.cfg.SourceAddress, conf.DepositAddressUrl, amountSun)
 	if err != nil {
 		t.fail(ctx, row, err)
 		return err
@@ -160,7 +160,7 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 		Path:    t.gasPath,
 		Address: t.cfg.SourceAddress,
 		Tx:      tx,
-		Meta:    signer.SignMeta{ToAddress: conf.DepositAddress, AmountSun: amountSun},
+		Meta:    signer.SignMeta{ToAddress: conf.DepositAddressUrl, AmountSun: amountSun},
 	})
 	if err != nil {
 		t.fail(ctx, row, err)

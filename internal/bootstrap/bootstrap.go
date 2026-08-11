@@ -29,7 +29,7 @@ type App struct {
 	//Cfg *config.Config
 	//Log     *logrus.Logger //*slog.Logger
 	//Store   *store.Store
-	Gateway *chain.Gateway
+	Gateway *chain.Gateway //调用https://api.trongrid.io/ 的接口
 }
 
 // Init loads the config, opens the datastores and builds the chain gateway.
@@ -82,7 +82,7 @@ func needsAddressFilter(service string) bool {
 
 // SignerClient builds the sign-service client.
 func (a *App) SignerClient() (*signer.Client, error) {
-	return signer.NewClient(config.Cfg.Sign)
+	return signer.NewClient(config.Cfg.SignServer)
 }
 
 // EnergyManager builds the provider registry and the manager on top of it.

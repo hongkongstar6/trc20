@@ -181,6 +181,19 @@ func UserWalletAddressesUpdatedSince(ctx context.Context, since time.Time, limit
 	return rows, err
 }
 
+// IsAddressBlacklisted reports whether the address is present in
+// address_blacklist. The list is read on every check so an address added by an
+// operator takes effect immediately.
+func IsAddressBlacklisted(ctx context.Context, address string) (bool, error) {
+	var count int64
+	err := MyStore.DB.WithContext(ctx).Model(&model.AddressBlacklist{}).
+		Where("address = ?", address).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func IsInternalWallet(ctx context.Context, row *model.WithdrawRecord, internal *int64) error {
 	//var internal int64
 	err := MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).

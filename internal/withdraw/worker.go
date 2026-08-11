@@ -105,7 +105,13 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	}
 	defer unlock()
 
-	if reason := w.riskCheck(ctx, row); reason != "" {
+	reason, err := w.riskCheck(ctx, row)
+	if err != nil {
+		// The order keeps its created state and is retried next round instead of
+		// being rejected on a transient database failure.
+		return err
+	}
+	if reason != "" {
 		return w.reject(ctx, row, reason)
 	}
 	amount, ok := new(big.Int).SetString(row.AmountUnits, 10)
@@ -203,33 +209,37 @@ func (w *Worker) broadcast(ctx context.Context, id int64, txid string, tx *tron.
 // riskCheck applies the wallet-side safety limits. Business risk control lives
 // in the business system; this is only the last line of defence.
 // 风险防控
-func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) string {
+func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) (string, error) {
 	if !tron.IsValidAddress(row.ToAddress) {
-		return "invalid destination address"
+		return "invalid destination address", nil
 	}
-	for _, banned := range config.Cfg.WithdrawServer.AddressBlacklist {
-		if banned == row.ToAddress {
-			return "destination address is blacklisted"
-		}
+	// The blacklist lives in the address_blacklist table and is queried on every
+	// check, so operator edits apply without restarting the worker.
+	blacklisted, err := store.IsAddressBlacklisted(ctx, row.ToAddress)
+	if err != nil {
+		return "", fmt.Errorf("withdraw: query address blacklist: %w", err)
+	}
+	if blacklisted {
+		return "destination address is blacklisted", nil
 	}
 	// Withdrawing to one of our own deposit addresses would be an internal
 	// transfer with no user-visible effect; it must be handled off chain.
 	var internal int64
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.UserWallet{}).
 		Where("address = ?", row.ToAddress).Count(&internal).Error; err == nil && internal > 0 {
-		return "destination is an internal wallet address"
+		return "destination is an internal wallet address", nil
 	}
 
 	if err := store.IsInternalWallet(ctx, row, &internal); err == nil && internal > 0 {
-		return "destination is an internal wallet address"
+		return "destination is an internal wallet address", nil
 	}
 
 	amount, ok := new(big.Int).SetString(row.AmountUnits, 10)
 	if !ok || amount.Sign() <= 0 {
-		return "invalid amount"
+		return "invalid amount", nil
 	}
 	if maxUnits, ok := new(big.Int).SetString(config.Cfg.WithdrawServer.MaxAmountUnits, 10); ok && maxUnits.Sign() > 0 && amount.Cmp(maxUnits) > 0 {
-		return "amount exceeds the single withdrawal limit"
+		return "amount exceeds the single withdrawal limit", nil
 	}
 	if limit, ok := new(big.Int).SetString(config.Cfg.WithdrawServer.DailyMaxUnits, 10); ok && limit.Sign() > 0 {
 		var sum string
@@ -241,11 +251,11 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) strin
 			Scan(&sum)
 		if today, ok := new(big.Int).SetString(sum, 10); ok {
 			if new(big.Int).Add(today, amount).Cmp(limit) > 0 {
-				return "daily withdrawal limit reached"
+				return "daily withdrawal limit reached", nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason string) error {

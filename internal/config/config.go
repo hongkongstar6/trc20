@@ -182,15 +182,14 @@ type DepositConfig struct {
 }
 
 type WithdrawConfig struct {
-	Enabled          bool     `yaml:"enabled"`
-	PollInterval     string   `yaml:"poll_interval"`
-	FeeLimitSun      int64    `yaml:"fee_limit_sun"`
-	TxExpirationSec  int64    `yaml:"tx_expiration_sec"`
-	MaxAmountUnits   string   `yaml:"max_amount_units"`
-	DailyMaxUnits    string   `yaml:"daily_max_units"`
-	ConfirmBlocks    int64    `yaml:"confirm_blocks"`
-	BroadcastRetries int      `yaml:"broadcast_retries"`
-	AddressBlacklist []string `yaml:"address_blacklist"`
+	Enabled          bool   `yaml:"enabled"`
+	PollInterval     string `yaml:"poll_interval"`
+	FeeLimitSun      int64  `yaml:"fee_limit_sun"`
+	TxExpirationSec  int64  `yaml:"tx_expiration_sec"`
+	MaxAmountUnits   string `yaml:"max_amount_units"`
+	DailyMaxUnits    string `yaml:"daily_max_units"`
+	ConfirmBlocks    int64  `yaml:"confirm_blocks"`
+	BroadcastRetries int    `yaml:"broadcast_retries"`
 }
 
 type SweepConfig struct {

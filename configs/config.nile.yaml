@@ -116,7 +116,7 @@ withdraw_server:
   max_amount_units: "50000000000"     # 50,000 USDT per order
   daily_max_units: "500000000000"     # 500,000 USDT per day
   confirm_blocks: 19
-  address_blacklist: []
+  # 提现黑名单在数据库表 address_blacklist 中维护
 
 sweep_server:
   enabled: true

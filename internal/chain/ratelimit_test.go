@@ -104,7 +104,7 @@ func TestSingleNodeWaitsOutSuspension(t *testing.T) {
 	defer srv.Close()
 
 	gw, err := NewGateway(config.ChainConfig{
-		Nodes:         []config.NodeConfig{{Name: "only", Endpoint: srv.URL, Enabled: true, Timeout: "5s"}},
+		ChainNodes:    []config.NodeConfig{{Name: "only", Endpoint: srv.URL, Enabled: true, Timeout: "5s"}},
 		RetryPerNode:  1,
 		RateLimitWait: "10s",
 	})
@@ -131,7 +131,7 @@ func TestSuspensionWaitRespectsRateLimitWait(t *testing.T) {
 	defer srv.Close()
 
 	gw, err := NewGateway(config.ChainConfig{
-		Nodes:         []config.NodeConfig{{Name: "only", Endpoint: srv.URL, Enabled: true, Timeout: "5s"}},
+		ChainNodes:    []config.NodeConfig{{Name: "only", Endpoint: srv.URL, Enabled: true, Timeout: "5s"}},
 		RetryPerNode:  1,
 		RateLimitWait: "1s",
 	})

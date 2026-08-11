@@ -258,12 +258,12 @@ chain:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(cfg.Chain.Nodes) != 2 {
-		t.Fatalf("nodes = %d", len(cfg.Chain.Nodes))
+	if len(cfg.ScannerServer.ChainNodes) != 2 {
+		t.Fatalf("nodes = %d", len(cfg.ScannerServer.ChainNodes))
 	}
 	// The gateway sorts by priority itself; the loader must keep the values.
-	if cfg.Chain.Nodes[0].Priority != 2 || cfg.Chain.Nodes[1].Priority != 1 {
-		t.Fatalf("priorities = %d/%d", cfg.Chain.Nodes[0].Priority, cfg.Chain.Nodes[1].Priority)
+	if cfg.ScannerServer.ChainNodes[0].Priority != 2 || cfg.ScannerServer.ChainNodes[1].Priority != 1 {
+		t.Fatalf("priorities = %d/%d", cfg.ScannerServer.ChainNodes[0].Priority, cfg.ScannerServer.ChainNodes[1].Priority)
 	}
 }
 
@@ -323,8 +323,8 @@ chain:
 	if cfg.MySQLCf.DSN != "user:p\"a#ss\nword@tcp(127.0.0.1:3306)/wallet" {
 		t.Fatalf("dsn = %q, want the raw environment value", cfg.MySQLCf.DSN)
 	}
-	if cfg.Chain.Nodes[0].Endpoint != "http://node:8090 # not a comment" {
-		t.Fatalf("endpoint = %q", cfg.Chain.Nodes[0].Endpoint)
+	if cfg.ScannerServer.ChainNodes[0].Endpoint != "http://node:8090 # not a comment" {
+		t.Fatalf("endpoint = %q", cfg.ScannerServer.ChainNodes[0].Endpoint)
 	}
 }
 
@@ -349,7 +349,7 @@ chain:
 	if cfg.RedisCf.DB != 3 {
 		t.Fatalf("redis db = %d, want 3", cfg.RedisCf.DB)
 	}
-	if !cfg.Chain.Nodes[0].Enabled {
+	if !cfg.ScannerServer.ChainNodes[0].Enabled {
 		t.Fatal("node must be enabled")
 	}
 }

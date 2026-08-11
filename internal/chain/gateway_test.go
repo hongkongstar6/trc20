@@ -22,7 +22,7 @@ func twoNodeGateway(t *testing.T, primary, fallback http.Handler) (*Gateway, fun
 	a := httptest.NewServer(primary)
 	b := httptest.NewServer(fallback)
 	gw, err := NewGateway(config.ChainConfig{
-		Nodes: []config.NodeConfig{
+		ChainNodes: []config.NodeConfig{
 			{Name: "fallback", Endpoint: b.URL, Priority: 2, Enabled: true, Timeout: "5s"},
 			{Name: "primary", Endpoint: a.URL, Priority: 1, Enabled: true, Timeout: "5s"},
 		},
@@ -35,7 +35,7 @@ func twoNodeGateway(t *testing.T, primary, fallback http.Handler) (*Gateway, fun
 }
 
 func TestNewGatewayRequiresAnEnabledNode(t *testing.T) {
-	_, err := NewGateway(config.ChainConfig{Nodes: []config.NodeConfig{
+	_, err := NewGateway(config.ChainConfig{ChainNodes: []config.NodeConfig{
 		{Name: "disabled", Endpoint: "http://127.0.0.1:1", Enabled: false},
 	}})
 	if !errors.Is(err, ErrNoNodeAvailable) {

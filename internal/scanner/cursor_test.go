@@ -39,7 +39,7 @@ func fakeNodeGateway(t *testing.T) *chain.Gateway {
 	}))
 	t.Cleanup(srv.Close)
 	gw, err := chain.NewGateway(config.ChainConfig{
-		Nodes:        []config.NodeConfig{{Name: "fake", Endpoint: srv.URL, Enabled: true, Timeout: "5s"}},
+		ChainNodes:   []config.NodeConfig{{Name: "fake", Endpoint: srv.URL, Enabled: true, Timeout: "5s"}},
 		RetryPerNode: 1,
 	})
 	if err != nil {

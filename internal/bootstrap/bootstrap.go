@@ -68,7 +68,7 @@ func Init(service string) (*App, error) {
 			return nil, err
 		}
 	}
-	gw, err := chain.NewGateway(config.Cfg.Chain)
+	gw, err := chain.NewGateway(config.Cfg.ScannerServer)
 	if err != nil {
 		logrus.Error("chain gateway init failed,", ",err:", err)
 		return nil, err

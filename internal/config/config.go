@@ -33,8 +33,8 @@ type Config struct {
 	SignServer     SignConfig     `yaml:"sign_server"`
 	Wallet         WalletConfig   `yaml:"wallet"`
 	SweepServer    SweepConfig    `yaml:"sweep_server"`
-	Bloom          BloomConfig    `yaml:"scanner_server"`
-	Chain          ChainConfig    `yaml:"chain"`
+	Bloom          BloomConfig    `yaml:"bloom"`
+	ScannerServer  ChainConfig    `yaml:"scanner_server"`
 	Deposit        DepositConfig  `yaml:"deposit"`
 	WithdrawServer WithdrawConfig `yaml:"withdraw_server"`
 	Energy         EnergyConfig   `yaml:"energy"`
@@ -116,7 +116,7 @@ type SignConfig struct {
 }
 
 type ChainConfig struct {
-	Nodes []NodeConfig `yaml:"nodes"`
+	ChainNodes []NodeConfig `yaml:"chain_nodes"`
 	// SolidityForConfirm reads confirmed data from the solidity node path.
 	SolidityForConfirm bool   `yaml:"solidity_for_confirm"`
 	RetryPerNode       int    `yaml:"retry_per_node"`
@@ -577,7 +577,7 @@ func (c *Config) validate() error {
 		return fmt.Errorf("mysql.dsn is required")
 	}
 	enabled := 0
-	for _, n := range c.Chain.Nodes {
+	for _, n := range c.ScannerServer.ChainNodes {
 		if n.Enabled {
 			enabled++
 		}

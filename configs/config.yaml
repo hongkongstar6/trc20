@@ -54,9 +54,9 @@ sign_server:
         ca_file: ./etc/wallet/tls/ca.crt
         server_name: sign.internal
 
-chain: #扫块配置节点
+scanner_server: #扫块配置节点
     # FullNode first once it is ready; TronGrid stays as the failover.
-    nodes:
+    chain_nodes:
         #- name: fullnode #自建节点
         #   type: fullnode
         #  endpoint: "https://api.trongrid.io" #"${FULLNODE_ENDPOINT}" #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
@@ -106,7 +106,7 @@ deposit:
 
 # 专属地址布隆过滤器：进程内纯 Go 实现，启动时全量加载 user_wallet 地址。
 # 区块里的收款地址先过布隆，未命中直接丢弃，命中才回 mysql 查用户。
-scanner_server:
+bloom:
     listen: "${BLOOM_LISTEN:-:8091}" # scanner 的地址同步端口
     bloom_notify_url: "${BLOOM_NOTIFY_URL:-http://127.0.0.1:8091/internal/bloom/address}" # api 分配地址后推送给 scanner
     token: "${BLOOM_TOKEN:-}"

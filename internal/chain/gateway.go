@@ -60,7 +60,7 @@ func NewGateway(c config.ChainConfig) (*Gateway, error) {
 		broadcastTimeout: config.Duration(c.BroadcastTimeout, 20*time.Second),
 		rateLimitWait:    config.Duration(c.RateLimitWait, 60*time.Second),
 	}
-	for _, nc := range c.Nodes {
+	for _, nc := range c.ChainNodes {
 		if !nc.Enabled {
 			continue
 		}

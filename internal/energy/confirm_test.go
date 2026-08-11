@@ -23,7 +23,7 @@ func resourceGateway(t *testing.T, energyLimit, energyUsed int64) (*chain.Gatewa
 		})
 	}))
 	gw, err := chain.NewGateway(config.ChainConfig{
-		Nodes:        []config.NodeConfig{{Name: "primary", Endpoint: srv.URL, Priority: 1, Enabled: true, Timeout: "5s"}},
+		ChainNodes:   []config.NodeConfig{{Name: "primary", Endpoint: srv.URL, Priority: 1, Enabled: true, Timeout: "5s"}},
 		RetryPerNode: 1,
 	})
 	if err != nil {

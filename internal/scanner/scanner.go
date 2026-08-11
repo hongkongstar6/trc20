@@ -213,7 +213,7 @@ func (s *Scanner) fetchRange(ctx context.Context, from, to int64) []blockData {
 		go func() {
 			defer wg.Done()
 			for num := range nums {
-				block, err := s.gw.GetBlockByNum(ctx, num)
+				block, err := s.gw.GetBlockByNum(ctx, num) //调用api获取区块数据
 				if err != nil {
 					out[num-from] = blockData{err: err}
 					continue

@@ -141,6 +141,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		if _, err := w.mgr.Acquire(ctx, "hot_pool", hot.Address, need, requestID); err != nil {
 			// Not fatal: the transaction burns TRX instead of stalling.
 			logrus.Error("withdraw energy rental failed, falling back to burning TRX", ",err:", err)
+			return err
 		}
 	}
 

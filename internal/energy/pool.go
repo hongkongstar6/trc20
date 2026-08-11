@@ -76,10 +76,13 @@ func (p *Pool) topUp(ctx context.Context) error {
 	logrus.Info("renting hot wallet energy batch",
 		"available", available, "low_water", lowWater, "batch_txs", batchTxs, "need", need)
 
-	order, err := p.mgr.Acquire(ctx, "hot_pool", p.addr, need, requestID)
+	// Never fall back to burning TRX: an unnoticed burn costs several times the
+	// rental price per withdrawal, so a rental outage has to be alerted on and
+	// leaves the withdrawals waiting.
+	order, err := p.mgr.AcquireRented(ctx, "hot_pool", p.addr, need, requestID)
 	if err != nil {
-		// Withdrawals stay possible: the transaction simply burns TRX.
-		logrus.Error("hot wallet energy rental failed, withdrawals will burn TRX", ",err:", err)
+		logrus.Error("ALERT hot wallet energy rental failed, withdrawals are stopped until it recovers",
+			"address", p.addr, "need", need, ",err:", err)
 		return err
 	}
 	logrus.Info("hot wallet energy batch delegated",

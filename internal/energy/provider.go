@@ -35,6 +35,9 @@ type QuoteRequest struct {
 	Amount   int64  // energy units or bandwidth bytes
 	Period   string // 1h | 1d | 3d | 30d (providers map this to their own codes)
 	Receiver string
+	// ExcludeBurn drops the trx_burn fallback from the ranking, so a caller
+	// that must not pay the fee in TRX gets an error instead.
+	ExcludeBurn bool
 }
 
 // Quote is a provider answer. CostTRX is the provider reported total, not a

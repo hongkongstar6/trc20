@@ -192,6 +192,18 @@ type SweepSkip struct {
 
 func (SweepSkip) TableName() string { return "sweep_skip" }
 
+// AddressBlacklist lists the destination addresses withdrawals must never pay
+// out to. It lives in the database so the list can be edited without a redeploy.
+// 地址黑名单
+type AddressBlacklist struct {
+	ID      int64     `gorm:"primaryKey" json:"id"`
+	Address string    `gorm:"size:64;uniqueIndex" json:"address"`
+	AddTime time.Time `gorm:"column:add_time" json:"add_time"`
+	Account string    `gorm:"column:account;size:128;not null;default:''" json:"account"`
+}
+
+func (AddressBlacklist) TableName() string { return "address_blacklist" }
+
 // EnergyRentOrder normalises orders across every rental provider.
 type EnergyRentOrder struct {
 	ID              int64      `gorm:"primaryKey" json:"id"`
@@ -306,6 +318,7 @@ func AllModels() []any {
 		&WithdrawRecord{},
 		&SweepRecord{},
 		&SweepSkip{},
+		&AddressBlacklist{},
 		&EnergyRentOrder{},
 		&TopupRecord{},
 		&ChainCursor{},

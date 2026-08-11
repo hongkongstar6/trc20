@@ -414,6 +414,7 @@ type triggerResult struct {
 
 // TriggerConstantContract performs a read-only contract call and also returns
 // the energy the same call would consume, which the fee estimator relies on.
+// 预估转账需要的能量
 func (g *Gateway) TriggerConstantContract(ctx context.Context, owner, contract, data string) (result string, energy int64, err error) {
 	ownerHex, err := tron.AddressToHex(owner)
 	if err != nil {

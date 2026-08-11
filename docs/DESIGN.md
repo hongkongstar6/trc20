@@ -111,9 +111,11 @@
 2. `wallet`：`id, uid, chain, address, derive_path, address_index, status, created_at`；唯一 `uq(chain,address)`、`uq(chain,derive_path)`、`uq(uid,chain)`
 3. `wallet_index_allocator`：`chain, next_index`（独立自增，**不用 uid 当 index**）
 4. `deposit_record`：`id, uid, coin_id, txid, event_index, from_address, to_address, amount, block_number, block_hash, status(pending/confirmed/orphaned/notified), created_at`；唯一 `uq(txid,event_index)`
-5. `withdraw_record`：`id, biz_order_no(唯一), uid, coin_id, to_address, amount, txid, signed_raw, expire_at, status(created/signed/broadcast/confirmed/failed/expired), retry_count, fail_reason`
-6. `sweep_record`：`id, wallet_id, coin_id, amount, txid, energy_used, trx_burned, fee_mode(rent/burn), rent_order_id, status, created_at`
-7. `energy_rent_order`（兼容两家）：`id, provider(gasstation/tronenergyrent), request_id(唯一,我方幂等键), provider_order_id(trade_no 或 orderId), receive_address, resource_type, requested_energy, delegated_energy, period, cost_trx, state(本地统一枚举: submitting/created/delegated/failed/partial/reclaimed), provider_raw_state, delegate_txid, delegated_at, expire_at, created_at`
+5. `withdraw_record`：`id, biz_order_no(唯一), uid, coin_id, to_address, amount, txid, signed_raw, expire_at, status(created/signed/broadcast/confirmed/failed/expired), retry_count, fail_reason, fail_code`
+   → `fail_reason` 是节点原文，`fail_code` 是稳定枚举（`out_of_energy / revert / sig_error / validate_error / tapos_error / bandwidth / expired / node_error …`）。重试与告警只认 `fail_code`，不解析文案；`fail_code` 一并推给业务方回调
+6. `sweep_record`：`id, wallet_id, coin_id, amount, txid, energy_used, trx_burned, fee_mode(rent/burn), rent_order_id, status, fail_reason, fail_code, retry_count, deposit_max_id, created_at`
+   → `deposit_max_id` 是本次归集覆盖的最大充值 id：确认后只把 `id <= deposit_max_id` 的充值标 `swept`，归集在途期间新到的充值保持未归集，下一轮再走一遍；`retry_count` 是该地址连续 `out_of_energy` 失败次数，用来抬高安全系数并在超过 `sweep_server.max_energy_retries` 后停手
+7. `energy_rent_order`（兼容两家）：`id, provider(gasstation/tronenergyrent), request_id(唯一,我方幂等键), provider_order_id(trade_no 或 orderId), receive_address, resource_type, requested_energy, delegated_energy, baseline_energy, period, cost_trx, state(本地统一枚举: submitting/created/delegated/failed/partial/reclaimed), provider_raw_state, delegate_txid, delegated_at, expire_at, created_at`
    → **两家的状态枚举不同（GasStation 用 0/1/2/3/10，TronEnergyRent 用 PAID_BY_USER/ENERGY_DELEGATED/…），必须在 Provider 层归一化成本地枚举**，业务代码不感知平台差异。
 8. `chain_cursor`：`chain, scanner, last_block, last_block_hash, updated_at`
 9. `block_snapshot`：最近 N 块 `number/hash/parent_hash`，用于定位分叉点
@@ -300,6 +302,12 @@ Provider 选路：cheapest 模式下并发报价
         ▼
 等代理到账：GasStation 回调(status=1) 为主 + 轮询兜底；TronEnergyRent 只能轮询
         统一再用链上 GetAccountResource 复核实际到账能量
+        下单前先记下发起地址的可用能量作为基线（baseline_energy），复核时比
+        「增量 ≥ 租赁量 * 95%」而不是比绝对值：热钱包本来就有能量，比绝对值会
+        在委托根本没到账时误判为已到账，正好落进「能量未及时到账」那类失败
+        先落库后下单意味着超时/进程重启会留下 created 状态的订单（可能已付款），
+        由 energy.Manager.RunReconcile 反查平台并给出终态，无法确认的标
+        abandoned 并打 error 日志等人工与平台对账
         │  超时 60~90s 或失败/部分成功 → 降级烧 TRX
         ▼
 能量到账后才 triggersmartcontract 构造未签名交易（此刻起算 expiration ≈ 60s）

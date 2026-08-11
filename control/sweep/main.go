@@ -48,6 +48,12 @@ func main() {
 		}
 	}()
 
+	go func() {
+		if err := mgr.RunReconcile(ctx); err != nil {
+			logrus.Error("energy order reconcile loop stopped", ",err:", err)
+		}
+	}()
+
 	topup := energy.NewTopup(config.Cfg.Energy.AutoTopup, store.MyStore, app.Gateway, signClient, nil,
 		mgr.Providers(), config.Cfg.Wallet.GasAccount.Path)
 	go func() {

@@ -33,6 +33,12 @@ func main() {
 		logrus.Error("energy manager init failed,", "err:", err)
 		return
 	}
+	go func() {
+		if err := mgr.RunReconcile(ctx); err != nil {
+			logrus.Error("energy order reconcile loop stopped,", ",err:", err)
+		}
+	}()
+
 	pool := energy.NewPool(config.Cfg.Energy, mgr, app.Gateway, nil, config.Cfg.Wallet.HotWallet.Address)
 	go func() {
 		if err := pool.Run(ctx); err != nil {

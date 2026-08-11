@@ -195,11 +195,15 @@ type WithdrawConfig struct {
 type SweepConfig struct {
 	Enabled bool `yaml:"enabled"`
 	// Interval is the delay between two sweep rounds, e.g. "3600s" or "1h".
-	Interval    string               `yaml:"interval"`
-	FeeLimitSun int64                `yaml:"fee_limit_sun"`
-	Threshold   SweepThresholdConfig `yaml:"threshold"`
-	MaxPerRound int                  `yaml:"max_per_round"`
-	LockTTL     string               `yaml:"lock_ttl"`
+	Interval    string `yaml:"interval"`
+	FeeLimitSun int64  `yaml:"fee_limit_sun"`
+	// TxExpirationSec is how long a signed sweep stays broadcastable; it must
+	// match the node's transaction expiration so reconciliation knows when a
+	// transaction absent from the chain can never be included any more.
+	TxExpirationSec int64                `yaml:"tx_expiration_sec"`
+	Threshold       SweepThresholdConfig `yaml:"threshold"`
+	MaxPerRound     int                  `yaml:"max_per_round"`
+	LockTTL         string               `yaml:"lock_ttl"`
 }
 
 // SweepThresholdConfig drives the runtime break-even computation of min_sweep.

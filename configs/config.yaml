@@ -130,6 +130,7 @@ sweep_server:
     enabled: true
     interval: 3600s # 归集频率：每隔多久跑一轮归集（3600秒 = 每小时一次）
     fee_limit_sun: 40000000
+    tx_expiration_sec: 60 # 与节点的交易过期时间一致，用于对账判定「过期且未上链」
     max_per_round: 50
     lock_ttl: 10m
     threshold:

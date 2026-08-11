@@ -164,6 +164,7 @@ type SweepRecord struct {
 	Status      string     `gorm:"size:16;index" json:"status"`
 	TxID        string     `gorm:"column:txid;size:70;index" json:"txid"`
 	SignedRaw   string     `gorm:"type:text" json:"-"`
+	ExpiredAt   *time.Time `json:"expired_at"`
 	FeeMode     string     `gorm:"size:24" json:"fee_mode"` // rent:<provider> | burn
 	EnergyOrder string     `gorm:"size:64" json:"energy_order"`
 	CostTRX     float64    `json:"cost_trx"`

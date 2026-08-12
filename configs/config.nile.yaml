@@ -1,21 +1,11 @@
-# Nile testnet configuration.
+# Nile 测试网配置。段名与字段名和 configs/config.yaml 完全一致，只有取值不同：
+# 测试网节点、Nile 的 USDT 合约、energy.rental_enabled: false（两家租赁平台都
+# 没有测试环境，所以提现和归集都直接烧发起地址自己的 TRX）。
 #
-# Nile is the end-to-end rehearsal environment: neither GasStation nor
-# TronEnergyRent offers a test environment, so energy.mode is pinned to
-# trx_burn here and the rental providers are validated separately on mainnet
-# with small amounts.
-#
-# No secret belongs in this file. Every sensitive value is an ${ENV} reference.
+# 本文件不放任何凭证，敏感值都是 ${ENV} 引用。
 env: nile
 network: nile
-# Mainnet configuration example. Only the differences from configs/config.nile.yaml
-# are commented; copy that file and apply these sections.
-#
-# Rollout order that this config assumes:
-#   1. Nile with energy.mode=fixed / trx_burn to exercise the whole flow.
-#   2. Mainnet with small amounts and one rental provider enabled.
-#   3. Mainnet with both providers and energy.mode=cheapest.
-#   4. auto_topup.enabled=true only after the topup audit trail looks right.
+
 log:
     level: debug
     log_dir: "./log" #日志路径
@@ -90,7 +80,7 @@ wallet:
     account_path: "m/44'/195'/0'/0" #TRON的币种编号是195,第一个0:主账户第几个,第二个0:收款,第三个0:第几个子账户，m/44'/60'/0'/0/0
     tokens:
         - symbol: USDT
-          contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t #mainnet USDT-TRC20 代币智能合约转账的地址
+          contract: "${USDT_CONTRACT:-TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf}" #Nile USDT-TRC20 代币合约地址
           decimals: 6
           enabled: true
     # 系统地址：withdraw 需要 hot_wallet 的 address+path，sweep 需要 finance_wallet
@@ -166,47 +156,22 @@ sweep_server:
         stale_days: 14
 
 energy:
-  # Nile: rental platforms have no test environment, so burn TRX. With
-  # rental_enabled=false the mode/fixed/providers below are ignored and every
-  # transfer pays its own energy and bandwidth out of the signing address' TRX.
-  rental_enabled: false
-  mode: fixed
-  fixed: trx_burn
-  quote_cache_ttl: 45s
-  default_period: 1h
-  energy_per_tx: 32000        # recipient already holds USDT
-  energy_per_tx_new: 65000    # recipient never held USDT: roughly double
-  wait_timeout: 90s
-  providers:
-    trx_burn:
-      enabled: true
-      options:
-        energy_fee_sun: "100"   # refreshed from getEnergyFee at runtime
-    gasstation:
-      enabled: false
-      options:
-        base_url: https://openapi.gasstation.ai
-        app_id: "${GASSTATION_APP_ID:-}"
-        app_secret: "${GASSTATION_APP_SECRET:-}"
-    tronenergyrent:
-      enabled: false
-      options:
-        base_url: https://api.tronenergyrent.com
-        api_key: "${TRONENERGYRENT_API_KEY:-}"
-  pool:
-    enabled: false            # mainnet only: it rents real energy
-    check_interval: 30s
-    low_water_txs: 3
-    batch_txs: 10
-    max_batch_txs: 30
-    period: 1h
-  auto_topup:
-    enabled: false            # master switch, off means alert only
-    source_address: "${GAS_ACCOUNT_ADDRESS}"
-    check_interval: 5m
-    gas_account:
-      target_trx: 20000
-      low_watermark_trx: 8000   # alert only: refilled manually from finance
+    # 是否向第三方平台租赁能量/带宽。默认 true；改成 false 后不再租赁，
+    # 每笔转账直接烧发起地址自己的 TRX（此时 mode/fixed/providers/pool/
+    # auto_topup 全部被忽略：mode 固定为 fixed + trx_burn，能量池与预付余额
+    # 自动充值关闭）。Nile 测试网只能用 false，两家租赁平台都没有测试环境。
+    rental_enabled: false
+    # Real comparison shopping across the enabled providers, burning TRX only
+    # when every rental fails.
+    mode: cheapest
+    default_period: 1h
+    # 租赁订单对账：Acquire 先落库再向平台下单，所以超时/进程重启会留下
+    # created 状态的订单（可能已经付过钱）。reconcile_interval 是轮询周期，
+    # pending_grace 之后才开始查，超过 pending_timeout 仍无法确认的订单标记
+    # abandoned 并打 error 日志，需要人工和平台对账。
+    reconcile_interval: 1m
+    pending_grace: 2m
+    pending_timeout: 30m
     providers:
         # trx_burn 是唯一不需要外部凭据的兜底方式：其他 provider 全部失败时烧 TRX。
         # 注意：提现（withdraw_server）与热钱包能量池只租不烧，租不到能量会停下来
@@ -214,14 +179,14 @@ energy:
         trx_burn:
             enabled: true
         gasstation:
-            enabled: true
+            enabled: false
             options:
                 base_url: https://openapi.gasstation.ai
                 app_id: "${GASSTATION_APP_ID}"
                 # GasStation also requires a fixed egress IP allowlist (error 100006).
                 app_secret: "${GASSTATION_APP_SECRET}"
         tronenergyrent:
-            enabled: true
+            enabled: false
             options:
                 base_url: https://api.tronenergyrent.com
                 # The key travels in the query string: make sure no proxy or access
@@ -230,7 +195,7 @@ energy:
     pool:
         # ~200 withdrawals a day from one hot wallet: renting per withdrawal costs
         # 200 orders and 200 small-order surcharges, batching costs about 20.
-        enabled: true
+        enabled: false
         check_interval: 30s
         low_water_txs: 3
         batch_txs: 10
@@ -244,7 +209,7 @@ energy:
             low_watermark_trx: 8000
         providers:
             gasstation:
-                enabled: true
+                enabled: false
                 low_watermark_trx: 2000
                 target_trx: 6000
                 max_single_topup_trx: 4000
@@ -254,7 +219,7 @@ energy:
                 # against this value before every transfer.
                 deposit_address_url: "https://openapi.gasstation.ai" #"${GASSTATION_DEPOSIT_ADDRESS}"
             tronenergyrent:
-                enabled: true
+                enabled: false
                 low_watermark_trx: 2000
                 target_trx: 6000
                 max_single_topup_trx: 4000

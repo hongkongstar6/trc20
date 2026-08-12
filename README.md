@@ -207,6 +207,34 @@ Nile 上它们完全无法使用；它们在主网上以小额交易进行验证
 「还没到账」，把订单判失败会让业务侧误退款。热钱包能量池（`energy.pool`）同样只租不烧，
 租不到时打 `ALERT` 并让提现等待。
 
+## 提现回调（notify_url）
+
+`POST /v1/withdraw` 的 `notify_url` 是**这一单**的回调地址（必须是 http/https
+绝对地址，否则直接 400），随订单存入 `withdraw_record.notify_url`。
+
+```bash
+POST /v1/withdraw {"order_no":"W1","ext_param":"1001","merchant_id":"m1","symbol":"USDT",
+                   "chain":"TRON","to_address":"T...","amount":"1500000",
+                   "notify_url":"https://m1/withdraw-notify","order_time":1700000000,
+                   "client_ip":"1.2.3.4","sgin":"<sha256>"}
+-> {"merchant_id":"m1","order_no":"W1","trade_no":"<uuid>","create_time":1700000000}
+```
+
+withdraw worker 对账时，交易进块后再等 `withdraw_server.confirm_blocks`（默认 19）
+个区块才结单，**成功和失败都结**，结单与 `notify_outbox` 写入同一个事务，由分发器
+投递到该单的 `notify_url`（签名规则与商户回调一致，用商户 `secret`）：
+
+| 订单终态 | `result` | 说明 |
+| --- | --- | --- |
+| `confirmed` | `success` | 交易上链成功且已满 19 个确认块 |
+| `failed` | `failed` | 链上执行失败、广播被永久拒绝、或过期未上链，业务侧退款 |
+| `rejected` | `rejected` | 风控在签名前拒单，链上没有任何交易 |
+
+回调体带 `order_no`、`trade_no`、`status`、`ext_param`、`txid`、`result`、`reason`、
+`fail_code`、`finished_at`，`event_id` 固定为 `withdraw:<order_no>`，业务侧按它去重。
+回调失败按退避重投，进死信后仍可用 `/v1/events`、`GET /v1/withdraw/:order_no` 对账。
+热钱包余额不足、能量租不到这两条硬停条件不算终态：订单留在 `created`，不发回调。
+
 ## 地址黑名单（address_blacklist）
 
 风控黑名单放在数据库表 `address_blacklist`，不再走 `config.yaml`：

@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -335,6 +336,12 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to_address"})
 		return
 	}
+	// The order outcome is only reportable if the callback URL is usable, and an
+	// unusable one must be refused now rather than dead lettered after payout.
+	if !isHTTPURL(req.NotifyUrl) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "notify_url must be an absolute http(s) URL"})
+		return
+	}
 	amount, ok := new(big.Int).SetString(req.Amount, 10)
 	if !ok || amount.Sign() <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "amount must be a positive integer in minimum units"})
@@ -361,6 +368,7 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		Symbol:      token.Symbol,
 		Contract:    token.Contract, //智能合约地址
 		ToAddress:   req.ToAddress,
+		NotifyURL:   req.NotifyUrl,
 		AmountUnits: amount.String(),
 		Decimals:    token.Decimals,
 		Status:      model.WithdrawStateCreated,
@@ -371,13 +379,31 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		// Duplicate submission: return the existing order instead of failing.
 		var existing model.WithdrawRecord
 		if e := store.MyStore.DB.WithContext(c).Where("order_no = ?", req.OrderNo).Take(&existing).Error; e == nil {
-			c.JSON(http.StatusOK, gin.H{"order_no": existing.OrderNo, "status": existing.Status, "txid": existing.TxID, "duplicated": true})
+			c.JSON(http.StatusOK, createWithdrawResponse{
+				MerchantId: existing.MerchantID,
+				OrderNo:    existing.OrderNo,
+				TradeNo:    existing.TradeNo,
+				CreateTime: existing.CreatedAt.Unix(),
+			})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"order_no": row.OrderNo, "trade_no": row.TradeNo, "status": row.Status})
+	c.JSON(http.StatusOK, createWithdrawResponse{
+		MerchantId: row.MerchantID,
+		OrderNo:    row.OrderNo,
+		TradeNo:    row.TradeNo,
+		CreateTime: row.CreatedAt.Unix(),
+	})
+}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func (s *Server) getWithdraw(c *gin.Context) {

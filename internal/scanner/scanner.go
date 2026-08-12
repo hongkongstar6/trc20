@@ -546,7 +546,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 		}
 		//event就是发送给商户的数据
 
-		return store.EnqueueOutbox(tx, depositEventID(rec), "deposit", rec.Account, rec.MerchantID, event)
+		return store.EnqueueOutbox(tx, depositEventID(rec), "deposit", rec.Account, rec.MerchantID, "", event)
 	}
 	return store.MyStore.DB.WithContext(ctx).Transaction(trans)
 }

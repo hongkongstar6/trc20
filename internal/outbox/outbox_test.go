@@ -3,7 +3,22 @@ package outbox
 import (
 	"crypto/hmac"
 	"testing"
+
+	"github.com/hongkongstar6/trc20/internal/model"
 )
+
+// A withdrawal is reported to the notify_url of its own order; everything else
+// falls back to the merchant wide callback URL.
+func TestCallbackURLPrefersEventNotifyURL(t *testing.T) {
+	mch := &model.Merchant{CallbackURL: "https://merchant/callback"}
+	got := callbackURL(&model.NotifyOutbox{NotifyURL: "https://biz/withdraw-notify"}, mch)
+	if got != "https://biz/withdraw-notify" {
+		t.Fatalf("callbackURL = %q, want the order notify_url", got)
+	}
+	if got := callbackURL(&model.NotifyOutbox{}, mch); got != mch.CallbackURL {
+		t.Fatalf("callbackURL = %q, want %q", got, mch.CallbackURL)
+	}
+}
 
 // Sign is the shared scheme between the business system and this gateway: the
 // timestamp is part of the signed material so a captured body cannot be

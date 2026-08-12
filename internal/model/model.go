@@ -137,6 +137,9 @@ type WithdrawRecord struct {
 	Contract    string `gorm:"size:64" json:"contract"`         //
 	FromAddress string `gorm:"size:64" json:"from_address"`     //付款地址
 	ToAddress   string `gorm:"size:64;index" json:"to_address"` //收款地址
+	// NotifyURL is the per-order callback URL the business system submitted with
+	// the order. The final outcome of the order is always posted to it.
+	NotifyURL   string `gorm:"column:notify_url;size:255" json:"notify_url"`
 	AmountUnits string `gorm:"type:decimal(38,0)" json:"amount_units"`
 	Decimals    int    `gorm:"size:32" json:"decimals"`
 	Status      string `gorm:"size:16;index" json:"status"`
@@ -298,8 +301,11 @@ type NotifyOutbox struct {
 	EventID string `gorm:"size:96;uniqueIndex" json:"event_id"`
 	// MerchantID routes the event to that merchant's callback URL. Empty means
 	// the event only goes to the platform wide publishers.
-	MerchantID string     `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
-	Account    string     `gorm:"column:account;size:64;index" json:"account"`
+	MerchantID string `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
+	Account    string `gorm:"column:account;size:64;index" json:"account"`
+	// NotifyURL overrides the merchant callback URL for this single event: a
+	// withdrawal is reported to the notify_url of its own order.
+	NotifyURL  string     `gorm:"column:notify_url;size:255" json:"notify_url"`
 	EventType  string     `gorm:"size:32;index" json:"event_type"`
 	Payload    string     `gorm:"type:text" json:"payload"`
 	Status     string     `gorm:"size:16;index" json:"status"` //发送状态

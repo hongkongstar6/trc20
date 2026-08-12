@@ -382,6 +382,7 @@ func (w *Worker) riskCheck(ctx context.Context, row *model.WithdrawRecord) (stri
 func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason string) error {
 	now := time.Now()
 	row.FailCode = FailCodeRejected
+	row.Status = model.WithdrawStateRejected
 	return store.MyStore.DB.WithContext(ctx).Transaction(
 		func(tx *gorm.DB) error {
 			res := tx.Model(&model.WithdrawRecord{}).
@@ -394,7 +395,8 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 				return res.Error
 			}
 			logrus.Warn("withdraw rejected", "order_no", row.OrderNo, "reason", reason)
-			return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result", "", "", w.event(row, "rejected", reason, now))
+			return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result",
+				row.ExtParam, row.MerchantID, row.NotifyURL, w.event(row, "rejected", reason, now))
 		},
 	)
 }
@@ -505,6 +507,7 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 
 func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, reason, failCode string, energyUsed, fee int64, now time.Time) error {
 	row.FailCode = failCode
+	row.Status = status
 	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
 			"status":      status,
@@ -531,7 +534,10 @@ func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, r
 		if status != model.WithdrawStateConfirmed {
 			outcome = "failed"
 		}
-		return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result", row.ExtParam, row.MerchantID, w.event(&row, outcome, reason, now))
+		// The business system is told the outcome of every settled order, success or
+		// failure, on the notify_url it submitted with the order.
+		return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result",
+			row.ExtParam, row.MerchantID, row.NotifyURL, w.event(&row, outcome, reason, now))
 	})
 }
 
@@ -540,6 +546,8 @@ func (w *Worker) event(row *model.WithdrawRecord, outcome, reason string, now ti
 		"event_id":   "withdraw:" + row.OrderNo,
 		"type":       "withdraw_result",
 		"order_no":   row.OrderNo,
+		"trade_no":   row.TradeNo,
+		"status":     row.Status,
 		"ext_param":  row.ExtParam,
 		"chain":      row.Chain,
 		"symbol":     row.Symbol,

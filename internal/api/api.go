@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -57,8 +58,8 @@ func (s *Server) Router() *gin.Engine {
 
 	v1.POST("/address", s.createAddress) //获取专属地址
 
-	v1.POST("/withdraw", s.createWithdraw)           //玩家发起提现
-	v1.GET("/withdraw/:biz_order_no", s.getWithdraw) //查询提现
+	v1.POST("/withdraw", s.createWithdraw)       //玩家发起提现
+	v1.GET("/withdraw/:order_no", s.getWithdraw) //查询提现
 
 	v1.GET("/deposits", s.listDeposits) //对账
 	v1.GET("/deposit/:event_id", s.getDeposit)
@@ -303,15 +304,27 @@ func (s *Server) createAddress(c *gin.Context) {
 // ----------------------------------------------------------------- withdrawal
 
 type createWithdrawRequest struct {
-	BizOrderNo string `json:"biz_order_no" binding:"required"`
-	Uid        string `json:"uid" binding:"required"`
-	MerchantId string `json:"merchant_id" binding:"required"`
-	Symbol     string `json:"symbol" binding:"required"`
-	ToAddress  string `json:"to_address" binding:"required"`
-	Amount     string `json:"amount" binding:"required"` // minimum units
+	OrderNo    string `json:"order_no" binding:"required"`    //商户唯一订单号
+	ExtParam   string `json:"ext_param" binding:"required"`   //拓展字段,一般存用户id
+	MerchantId string `json:"merchant_id" binding:"required"` //商户id
+	Symbol     string `json:"symbol" binding:"required"`      //提现币种 USDC / USDT / BNB / BTC / SOL / ETH /TRX
+	Chain      string `json:"chain" binding:"required"`       //链类型:ETH / TRON / BSC / BTC / SOL
+	ToAddress  string `json:"to_address" binding:"required"`  //提现地址
+	Amount     string `json:"amount" binding:"required"`      //提现金额 minimum units
+	NotifyUrl  string `json:"notify_url" binding:"required"`  //异步通知地址
+	OrderTime  int64  `json:"order_time" binding:"required"`  //下单时间戳秒
+	ClientIp   string `json:"client_ip" binding:"required"`   //用户ip
+	Sign       string `json:"sgin" binding:"required"`        //签名
 }
 
-// createWithdraw 会记录订单,biz_order_no 的唯一性保证了重试提交的安全性：// 同一订单永远不会被支付两次。
+type createWithdrawResponse struct {
+	MerchantId string `json:"merchant_id" binding:"required"` //商户id
+	OrderNo    string `json:"order_no" binding:"required"`    //商户唯一订单号
+	TradeNo    string `json:"trade_no" binding:"required"`    //支付方的交易id
+	CreateTime int64  `json:"create_time" binding:"required"` //创建时间戳
+}
+
+// createWithdraw 会记录订单,order_no 的唯一性保证了重试提交的安全性：// 同一订单永远不会被支付两次。
 func (s *Server) createWithdraw(c *gin.Context) {
 	var req createWithdrawRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -338,9 +351,11 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported symbol"})
 		return
 	}
+
 	row := model.WithdrawRecord{
-		BizOrderNo:  req.BizOrderNo,
-		Account:     merchant.MakeAccount(req.MerchantId, req.Uid),
+		OrderNo:     req.OrderNo,
+		TradeNo:     uuid.New().String(), //生成唯一
+		ExtParam:    req.ExtParam,
 		MerchantID:  req.MerchantId,
 		Chain:       "TRON",
 		Symbol:      token.Symbol,
@@ -355,19 +370,19 @@ func (s *Server) createWithdraw(c *gin.Context) {
 	if err := store.MyStore.DB.WithContext(c).Create(&row).Error; err != nil {
 		// Duplicate submission: return the existing order instead of failing.
 		var existing model.WithdrawRecord
-		if e := store.MyStore.DB.WithContext(c).Where("biz_order_no = ?", req.BizOrderNo).Take(&existing).Error; e == nil {
-			c.JSON(http.StatusOK, gin.H{"biz_order_no": existing.BizOrderNo, "status": existing.Status, "txid": existing.TxID, "duplicated": true})
+		if e := store.MyStore.DB.WithContext(c).Where("order_no = ?", req.OrderNo).Take(&existing).Error; e == nil {
+			c.JSON(http.StatusOK, gin.H{"order_no": existing.OrderNo, "status": existing.Status, "txid": existing.TxID, "duplicated": true})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"biz_order_no": row.BizOrderNo, "status": row.Status})
+	c.JSON(http.StatusOK, gin.H{"order_no": row.OrderNo, "trade_no": row.TradeNo, "status": row.Status})
 }
 
 func (s *Server) getWithdraw(c *gin.Context) {
 	var row model.WithdrawRecord
-	err := store.MyStore.DB.WithContext(c).Where("biz_order_no = ?", c.Param("biz_order_no")).Take(&row).Error
+	err := store.MyStore.DB.WithContext(c).Where("order_no = ?", c.Param("order_no")).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
@@ -443,4 +458,19 @@ func (s *Server) listEvents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"total": len(rows), "items": rows})
+}
+
+// 提现回调
+type WithdrawCallBackReq struct {
+	Status      int    `json:"status"`      //状态 1 成功 2.失败
+	MerchantID  string `json:"merchant_id"` //商户名称,
+	OrderNo     string `json:"order_no"`    //商户订单id,
+	TransNo     string `json:"trans_no"`    //支付系统交易id,
+	ToAddress   string `json:"to_address"`  //收款地址,
+	CoinNum     string `json:"coinNum"`     //提现金额,
+	RealCoinNum string `json:"realCoinNum"` //实际支付金额,
+	CreateTime  string `json:"createTime"`  //创建订单时间,
+	TradeTime   int64  `json:"tradeTime"`   //交易时间戳,
+	TxId        string `json:"txId"`        //: "21199767b669421a485e302c21d1406e44c7b8792cea7ab2c0137766c31935bc",
+	Sign        string `json:"sign"`        //签名
 }

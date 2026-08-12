@@ -1,6 +1,6 @@
 // Package withdraw executes withdrawal orders submitted by the business
 // system. The business system already debited or froze the user balance, so the
-// only guarantee this package must provide is: one biz_order_no results in at
+// only guarantee this package must provide is: one order_no results in at
 // most one on-chain transfer, and its final outcome is always reported.
 package withdraw
 
@@ -105,7 +105,7 @@ func (w *Worker) processCreated(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.execute(ctx, &row); err != nil {
-			logrus.Error("withdraw execute failed", "biz_order_no", row.BizOrderNo, ",err:", err)
+			logrus.Error("withdraw execute failed", "order_no", row.OrderNo, ",err:", err)
 		}
 	}
 	return nil
@@ -115,7 +115,7 @@ func (w *Worker) processCreated(ctx context.Context) error {
 // created -> signed -> broadcast with a compare-and-swap on every hop, so a
 // duplicated worker cannot broadcast twice.
 func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
-	unlock, ok := store.MyStore.Lock(ctx, "withdraw:"+row.BizOrderNo, 5*time.Minute)
+	unlock, ok := store.MyStore.Lock(ctx, "withdraw:"+row.OrderNo, 5*time.Minute)
 	if !ok {
 		return nil
 	}
@@ -313,7 +313,7 @@ func (w *Worker) tokenBalance(ctx context.Context, address string) (*big.Int, er
 // the cause the same order is executed by a later round instead of being
 // failed back to the business system.
 func (w *Worker) halt(ctx context.Context, row *model.WithdrawRecord, failCode, reason string) error {
-	logrus.Error("ALERT withdraw halted", "biz_order_no", row.BizOrderNo,
+	logrus.Error("ALERT withdraw halted", "order_no", row.OrderNo,
 		"fail_code", failCode, "reason", reason)
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
@@ -322,7 +322,7 @@ func (w *Worker) halt(ctx context.Context, row *model.WithdrawRecord, failCode, 
 			"fail_code":   failCode,
 			"updated_at":  time.Now(),
 		}).Error; err != nil {
-		logrus.Error("withdraw halt bookkeeping failed", "biz_order_no", row.BizOrderNo, ",err:", err)
+		logrus.Error("withdraw halt bookkeeping failed", "order_no", row.OrderNo, ",err:", err)
 	}
 	return fmt.Errorf("%w: %s", ErrHalted, reason)
 }
@@ -393,8 +393,8 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 			if res.Error != nil || res.RowsAffected == 0 {
 				return res.Error
 			}
-			logrus.Warn("withdraw rejected", "biz_order_no", row.BizOrderNo, "reason", reason)
-			return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", "", "", w.event(row, "rejected", reason, now))
+			logrus.Warn("withdraw rejected", "order_no", row.OrderNo, "reason", reason)
+			return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result", "", "", w.event(row, "rejected", reason, now))
 		},
 	)
 }
@@ -416,7 +416,7 @@ func (w *Worker) Reconcile(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.reconcileOne(ctx, row, head.Number()); err != nil {
-			logrus.Error("reconcile withdraw failed", "biz_order_no", row.BizOrderNo, ",err:", err)
+			logrus.Error("reconcile withdraw failed", "order_no", row.OrderNo, ",err:", err)
 		}
 	}
 	return nil
@@ -454,7 +454,7 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		// The USDT never left the hot wallet, so the order is reported failed and
 		// the business system refunds; withdrawals are never retried on chain
 		// because a second transfer could double pay one business order.
-		logrus.Error("withdraw failed on chain", "biz_order_no", row.BizOrderNo,
+		logrus.Error("withdraw failed on chain", "order_no", row.OrderNo,
 			"txid", row.TxID, "fail_code", failCode, "reason", reason)
 		return w.finish(ctx, row, model.WithdrawStateFailed, "on-chain failure: "+reason,
 			failCode, info.Receipt.EnergyUsageTotal, info.Fee, now)
@@ -531,24 +531,24 @@ func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, r
 		if status != model.WithdrawStateConfirmed {
 			outcome = "failed"
 		}
-		return store.EnqueueOutbox(tx, "withdraw:"+row.BizOrderNo, "withdraw_result", row.Account, row.MerchantID, w.event(&row, outcome, reason, now))
+		return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result", row.ExtParam, row.MerchantID, w.event(&row, outcome, reason, now))
 	})
 }
 
 func (w *Worker) event(row *model.WithdrawRecord, outcome, reason string, now time.Time) map[string]any {
 	return map[string]any{
-		"event_id":     "withdraw:" + row.BizOrderNo,
-		"type":         "withdraw_result",
-		"biz_order_no": row.BizOrderNo,
-		"account":      row.Account,
-		"chain":        row.Chain,
-		"symbol":       row.Symbol,
-		"amount":       row.AmountUnits,
-		"decimals":     row.Decimals,
-		"to_address":   row.ToAddress,
-		"txid":         row.TxID,
-		"result":       outcome,
-		"reason":       reason,
+		"event_id":   "withdraw:" + row.OrderNo,
+		"type":       "withdraw_result",
+		"order_no":   row.OrderNo,
+		"ext_param":  row.ExtParam,
+		"chain":      row.Chain,
+		"symbol":     row.Symbol,
+		"amount":     row.AmountUnits,
+		"decimals":   row.Decimals,
+		"to_address": row.ToAddress,
+		"txid":       row.TxID,
+		"result":     outcome,
+		"reason":     reason,
 		// fail_code lets the business system branch without parsing reason.
 		"fail_code":   row.FailCode,
 		"finished_at": now.Unix(),

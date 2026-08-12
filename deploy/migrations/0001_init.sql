@@ -311,7 +311,7 @@ CREATE TABLE IF NOT EXISTS `wallet_index_allocator`  (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `withdraw_record`  (
   `id` bigint NOT NULL AUTO_INCREMENT,
-  `biz_order_no` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `order_no` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
   `account` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
   `chain` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
   `symbol` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS `withdraw_record`  (
   `updated_at` datetime(3) NULL DEFAULT NULL,
   `merchant_id` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `idx_withdraw_record_biz_order_no`(`biz_order_no` ASC) USING BTREE,
+  UNIQUE INDEX `idx_withdraw_record_order_no`(`order_no` ASC) USING BTREE,
   INDEX `idx_withdraw_uid`(`account` ASC) USING BTREE,
   INDEX `idx_withdraw_to`(`to_address` ASC) USING BTREE,
   INDEX `idx_withdraw_status`(`status` ASC) USING BTREE,

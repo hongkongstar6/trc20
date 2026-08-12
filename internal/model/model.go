@@ -123,19 +123,20 @@ type DepositRecord struct {
 
 func (DepositRecord) TableName() string { return "deposit_record" }
 
-// WithdrawRecord holds one business withdrawal order. biz_order_no is unique,
+// WithdrawRecord holds one business withdrawal order. order_no is unique,
 // which is what guarantees "at most one on-chain transfer per business order".
 // 提现订单
 type WithdrawRecord struct {
 	ID          int64  `gorm:"primaryKey" json:"id"`
-	BizOrderNo  string `gorm:"size:64;uniqueIndex" json:"biz_order_no"`
-	Account     string `gorm:"column:account;index" json:"account"`
+	OrderNo     string `gorm:"size:64;uniqueIndex" json:"order_no"`     //商户订单号(商户生成订单号)
+	TradeNo     string `gorm:"size:64;uniqueIndex" json:"trade_no"`     //交易订单号(我方生成订单号)
+	ExtParam    string `gorm:"column:ext_param;index" json:"ext_param"` //拓展字段，原样返回，一般存用户id
 	MerchantID  string `gorm:"column:merchant_id;size:30" json:"merchant_id"`
-	Chain       string `gorm:"size:16" json:"chain"`
-	Symbol      string `gorm:"size:16" json:"symbol"`
-	Contract    string `gorm:"size:64" json:"contract"`
-	FromAddress string `gorm:"size:64" json:"from_address"`
-	ToAddress   string `gorm:"size:64;index" json:"to_address"`
+	Chain       string `gorm:"size:16" json:"chain"`            //公链类型，ETH / TRON / BSC / BTC / SOL
+	Symbol      string `gorm:"size:16" json:"symbol"`           //币种,usdt,udsc
+	Contract    string `gorm:"size:64" json:"contract"`         //
+	FromAddress string `gorm:"size:64" json:"from_address"`     //付款地址
+	ToAddress   string `gorm:"size:64;index" json:"to_address"` //收款地址
 	AmountUnits string `gorm:"type:decimal(38,0)" json:"amount_units"`
 	Decimals    int    `gorm:"size:32" json:"decimals"`
 	Status      string `gorm:"size:16;index" json:"status"`
@@ -143,7 +144,7 @@ type WithdrawRecord struct {
 	// FailCode is the classified reason (chain.Fail*), which is what retry and
 	// alerting branch on; FailReason keeps the raw node message.
 	FailCode string `gorm:"size:32;index" json:"fail_code"`
-	TxID     string `gorm:"column:txid;size:70;index" json:"txid"`
+	TxID     string `gorm:"column:txid;size:70;index" json:"txid"` //交易的链hash
 	// SignedRaw is the exact signed transaction. A retry always rebroadcasts
 	// these bytes; a second transaction is only built after expiration and
 	// only when the txid is provably absent from the chain.

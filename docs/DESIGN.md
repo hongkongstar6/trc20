@@ -15,17 +15,17 @@
 
 本系统 = **链上资产网关**，不是账务系统。
 
-| 职责 | 钱包系统 | 业务系统 |
-|---|---|---|
-| 地址分配 | ✅ | ❌ |
-| 链上充值识别、确认、去重 | ✅ | ❌ |
-| 充值流水推送（MQ + 回调） | ✅ | 消费并加余额 |
-| 用户余额 / 冻结 / 可用 | ❌ | ✅ |
-| 提现风控、扣款、冻结 | ❌ | ✅ |
-| 提现下单接收 + 签名广播 + 结果回推 | ✅ | 发起 + 据结果确认/退款 |
-| 归集、能量管理、热钱包 | ✅ | ❌ |
+| 职责                               | 钱包系统 | 业务系统               |
+| ---------------------------------- | -------- | ---------------------- |
+| 地址分配                           | ✅       | ❌                     |
+| 链上充值识别、确认、去重           | ✅       | ❌                     |
+| 充值流水推送（MQ + 回调）          | ✅       | 消费并加余额           |
+| 用户余额 / 冻结 / 可用             | ❌       | ✅                     |
+| 提现风控、扣款、冻结               | ❌       | ✅                     |
+| 提现下单接收 + 签名广播 + 结果回推 | ✅       | 发起 + 据结果确认/退款 |
+| 归集、能量管理、热钱包             | ✅       | ❌                     |
 
-**边界铁律**：同一笔链上事件，**只推一次「确认态」流水**，且带全局唯一 `event_id` 供下游幂等；提现只保证「同一 `biz_order_no` 最多出金一次」。
+**边界铁律**：同一笔链上事件，**只推一次「确认态」流水**，且带全局唯一 `event_id` 供下游幂等；提现只保证「同一 `order_no` 最多出金一次」。
 
 ---
 
@@ -64,19 +64,23 @@
 统一接口：`GetNowBlock / GetBlockByNum / GetTxInfoByBlockNum / GetTxInfoById / TriggerConstantContract / BroadcastTx / GetAccountResource`。
 
 节点优先级 **完全由配置驱动**（`nodes: [{name, type, endpoint, priority, weight}]`）：
+
 - 阶段一（现在）：`TronGrid(priority=1)` → `TronGrid 备用 Key(priority=2)`
 - 阶段二（你的 FullNode 就绪）：`FullNode(priority=1)` → `TronGrid(priority=2)`
 - **切换只改配置，不改代码**，且支持灰度（按请求类型分流：先把「查询」切到 FullNode，「广播」仍双发）。
 
 **查询路由**
+
 ```
 主节点 → 成功返回
       → 失败/超时(800ms)/高度落后 → 备节点
                                   → 都失败 → 熔断，游标停在原地并告警（绝不跳块）
 ```
+
 健康判定不能只看进程存活：比较各节点 `now_block`，**落后主链 > 20 块判定不健康**自动降级，否则表现为「充值莫名延迟」。TronGrid 有 QPS 限制，需内置限流器 + 429 退避。
 
 **广播路由**
+
 ```
 主节点广播
  ├─ result=true → 记 txid，进入确认追踪
@@ -84,6 +88,7 @@
  ├─ DUP_TRANSACTION_ERROR → 视为成功（已在内存池）
  └─ 网络错误/超时 → 备节点广播【同一份已签名字节】
 ```
+
 - 兜底广播必须重发**同一份签名交易**（txid 相同，链上天然去重），**绝不允许重新构造**。
 - 广播失败 ≠ 没上链：网络类错误一律按 txid 轮询链上定论；交易 `expiration`（默认 60s）过期且链上查无，才可判失败。
 
@@ -91,15 +96,15 @@
 
 ## 3. 服务拆分
 
-| 服务 | 职责 | 扩容 | 约束 |
-|---|---|---|---|
-| wallet-api | 对外 HTTP（HMAC 签名 + 时间戳防重放 + IP 白名单） | 是 | 无状态 |
-| wallet-service | 流水写入、状态机、outbox | 是 | 状态流转 CAS |
-| deposit-scanner | 游标推进、事件解析、确认位、重组回滚 | **单主** | 分布式锁选主 |
-| withdraw-worker | 出金构造/广播/确认 | 是（按记录分片） | 单笔串行 |
-| sweep-service | 归集 + 能量供给编排 | 是 | 每地址一把锁 |
-| sign-service | HD 派生 + 签名 | 是 | 独立网段、mTLS、白名单、全审计 |
-| chain-gateway / energy-provider | 建议先做成**内嵌库**而非独立服务，少一跳、少一处故障点 | — | — |
+| 服务                            | 职责                                                   | 扩容             | 约束                           |
+| ------------------------------- | ------------------------------------------------------ | ---------------- | ------------------------------ |
+| wallet-api                      | 对外 HTTP（HMAC 签名 + 时间戳防重放 + IP 白名单）      | 是               | 无状态                         |
+| wallet-service                  | 流水写入、状态机、outbox                               | 是               | 状态流转 CAS                   |
+| deposit-scanner                 | 游标推进、事件解析、确认位、重组回滚                   | **单主**         | 分布式锁选主                   |
+| withdraw-worker                 | 出金构造/广播/确认                                     | 是（按记录分片） | 单笔串行                       |
+| sweep-service                   | 归集 + 能量供给编排                                    | 是               | 每地址一把锁                   |
+| sign-service                    | HD 派生 + 签名                                         | 是               | 独立网段、mTLS、白名单、全审计 |
+| chain-gateway / energy-provider | 建议先做成**内嵌库**而非独立服务，少一跳、少一处故障点 | —                | —                              |
 
 交付形态建议：**monorepo + 多 entrypoint**（一个代码库，`-mode=api|scanner|withdraw|sweep|sign`），后续可平滑物理拆分。
 
@@ -111,7 +116,7 @@
 2. `wallet`：`id, uid, chain, address, derive_path, address_index, status, created_at`；唯一 `uq(chain,address)`、`uq(chain,derive_path)`、`uq(uid,chain)`
 3. `wallet_index_allocator`：`chain, next_index`（独立自增，**不用 uid 当 index**）
 4. `deposit_record`：`id, uid, coin_id, txid, event_index, from_address, to_address, amount, block_number, block_hash, status(pending/confirmed/orphaned/notified), created_at`；唯一 `uq(txid,event_index)`
-5. `withdraw_record`：`id, biz_order_no(唯一), uid, coin_id, to_address, amount, txid, signed_raw, expire_at, status(created/signed/broadcast/confirmed/failed/expired), retry_count, fail_reason, fail_code`
+5. `withdraw_record`：`id, order_no(唯一), uid, coin_id, to_address, amount, txid, signed_raw, expire_at, status(created/signed/broadcast/confirmed/failed/expired), retry_count, fail_reason, fail_code`
    → `fail_reason` 是节点原文，`fail_code` 是稳定枚举（`out_of_energy / revert / sig_error / validate_error / tapos_error / bandwidth / expired / node_error …`）。重试与告警只认 `fail_code`，不解析文案；`fail_code` 一并推给业务方回调
 6. `sweep_record`：`id, wallet_id, coin_id, amount, txid, energy_used, trx_burned, fee_mode(rent/burn), rent_order_id, status, fail_reason, fail_code, retry_count, deposit_max_id, created_at`
    → `deposit_max_id` 是本次归集覆盖的最大充值 id：确认后只把 `id <= deposit_max_id` 的充值标 `swept`，归集在途期间新到的充值保持未归集，下一轮再走一遍；`retry_count` 是该地址连续 `out_of_energy` 失败次数，用来抬高安全系数并在超过 `sweep_server.max_energy_retries` 后停手
@@ -144,6 +149,7 @@
 流程：`游标块 → 拉块 → 解析 log → to 命中 wallet（Redis Set + 布隆过滤器）→ deposit_record(pending) → 确认位达标 confirmed → 同事务写 outbox → 推送 → notified`
 
 必须处理：
+
 - **确认位**：TRON 约 19 块（约 1 分钟）后固化。建议以 **solidity 节点（已固化数据）** 为准，比自己数确认位更稳；`coin.confirmations` 可配。
 - **执行结果**：校验 `receipt.result == SUCCESS`（REVERT 交易也可能留 log）。
 - **合约白名单**：只认 `coin` 表登记的合约，防山寨合约假充值。
@@ -154,16 +160,23 @@
 ## 8. 流水推送（替代原「账本」章节）
 
 只推 confirmed，一笔一条，带幂等键：
+
 ```json
 {
   "event_id": "<txid>:<event_index>",
   "type": "deposit",
-  "uid": 10001, "chain": "TRON", "symbol": "USDT",
-  "amount": "100000000", "decimals": 6,
-  "txid": "...", "event_index": 3,
-  "block_number": 12345678, "confirmed_at": 1712345678
+  "uid": 10001,
+  "chain": "TRON",
+  "symbol": "USDT",
+  "amount": "100000000",
+  "decimals": 6,
+  "txid": "...",
+  "event_index": 3,
+  "block_number": 12345678,
+  "confirmed_at": 1712345678
 }
 ```
+
 - 双通道：**MQ（主） + HTTP 回调（备）**，均由 outbox 驱动，指数退避（1s→…→10min，最长 24h），失败进死信 + 告警。
 - 语义是「至少一次」，下游必须按 `event_id` 幂等。
 - 必备补偿手段：**按时间区间分页拉全量 confirmed 流水的对账接口** + 按 `event_id` 单条查询。这是「只推流水」模式下下游自愈的唯一办法。
@@ -181,12 +194,14 @@ type EnergyProvider interface {
     Balance() (prepaidTRX, error)                                 // 预付余额水位
 }
 ```
+
 实现：`gasstation` / `tronenergyrent` / `trx_burn`（打 TRX 让其自烧，兜底 & 测试网）/ `staking`（自质押代理，用于出金热钱包）。
 
 **插件化注册（为你上线后再加平台预留）**：每个 Provider 自注册到 `registry[name]`，启动时按配置 `providers: [{name, enabled, weight, credentials_env, ...}]` 实例化。
 **新增一家 = 新增一个文件实现 5 个方法 + 配置里加一段**，不改 sweep/withdraw 主干。为此接口层必须屏蔽掉两家已知的差异：幂等键有/无、回调有/无、状态枚举不同、最小起租不同、计价规则不同（所以 `Quote` 一律返回**平台接口给的总价**，不允许自己按单价乘）。
 
 选路策略（配置驱动，三种模式，**默认 `cheapest`**）：
+
 - `fixed`：固定用某一家（灰度期用）
 - `priority`：主 → 备 →（都不行）`trx_burn`
 - `cheapest`：**每次下单前并发比价**（两家的报价接口都便宜且快），选总成本最低者；报价缓存 30~60s 防打满对方限流
@@ -234,13 +249,14 @@ type EnergyProvider interface {
 
 链上参数（TronGrid `getchainparameters` 实测）：`getEnergyFee = 100 SUN/能量`、`getTransactionFee = 1000 SUN/字节`；TRX ≈ $0.329。
 
-| 场景 | 所需能量 | 烧 TRX | TronEnergyRent 租 1h | GasStation（按其文档示例 38 SUN 估） |
-|---|---|---|---|---|
-| 归集（收款方=财务地址，已有 USDT） | ~32,000 | 3.2 TRX ≈ $1.05 | **1.69 TRX ≈ $0.56** | 最小起租 64,400 → ~2.45 TRX ≈ $0.80 |
-| 出金（收款方可能零 USDT 余额） | ~65,000 | 6.5 TRX ≈ $2.14 | **2.925 TRX ≈ $0.96** | ~2.45 TRX ≈ $0.81 |
-| 带宽 345 字节（免费额度不足时） | — | 0.345 TRX ≈ $0.11 | 最小 1000，0.637 TRX | 最小 5000 |
+| 场景                               | 所需能量 | 烧 TRX            | TronEnergyRent 租 1h  | GasStation（按其文档示例 38 SUN 估） |
+| ---------------------------------- | -------- | ----------------- | --------------------- | ------------------------------------ |
+| 归集（收款方=财务地址，已有 USDT） | ~32,000  | 3.2 TRX ≈ $1.05   | **1.69 TRX ≈ $0.56**  | 最小起租 64,400 → ~2.45 TRX ≈ $0.80  |
+| 出金（收款方可能零 USDT 余额）     | ~65,000  | 6.5 TRX ≈ $2.14   | **2.925 TRX ≈ $0.96** | ~2.45 TRX ≈ $0.81                    |
+| 带宽 345 字节（免费额度不足时）    | —        | 0.345 TRX ≈ $0.11 | 最小 1000，0.637 TRX  | 最小 5000                            |
 
 结论：
+
 - 租赁比烧 TRX 省 **50%~55%**，方向正确。
 - **小额度场景 TronEnergyRent 明显更优**（最小 15000 vs 64400）；大额/首次转账两家接近。→ 这正是要做 `cheapest` 自动比价的原因，而不是固定一家。
 - **带宽不要租**：345 字节只烧 0.345 TRX，比最小起租（0.637 TRX）还便宜，且每账户每天有 600 免费带宽。带宽固定走烧 TRX。
@@ -251,22 +267,24 @@ type EnergyProvider interface {
 实测链上参数：`TotalEnergyLimit = 1.8e11 / 日`、`TotalEnergyWeight = 1.88e10 TRX` → **1 TRX 质押 ≈ 9.6 能量/天**。
 出金 200 笔/日 × 65,000 能量 = **1,300 万能量/天**。
 
-| 方案 | 月度成本 | 占用本金 | 结论 |
-|---|---|---|---|
-| 烧 TRX | 200×6.5=1,300 TRX/日 ≈ **39,000 TRX/月 ≈ $12.8k** | 0 | 最贵 |
-| **租赁 1h（选定）** | 200×2.925=585 TRX/日 ≈ **17,550 TRX/月 ≈ $5.8k** | 仅预付余额 | 省 55% |
-| 自质押 | 边际 0 | 需质押 **≈ 136 万 TRX ≈ $45万**，且 14 天解锁期 | 本金太重，你已否决 |
-| 租 1d / 30d 长期档 | 65k·1d=6.825 TRX、1天只再生一次 → 等效 6.8 TRX/笔 | — | **比 1h 贵**，不采用 |
+| 方案                | 月度成本                                          | 占用本金                                        | 结论                 |
+| ------------------- | ------------------------------------------------- | ----------------------------------------------- | -------------------- |
+| 烧 TRX              | 200×6.5=1,300 TRX/日 ≈ **39,000 TRX/月 ≈ $12.8k** | 0                                               | 最贵                 |
+| **租赁 1h（选定）** | 200×2.925=585 TRX/日 ≈ **17,550 TRX/月 ≈ $5.8k**  | 仅预付余额                                      | 省 55%               |
+| 自质押              | 边际 0                                            | 需质押 **≈ 136 万 TRX ≈ $45万**，且 14 天解锁期 | 本金太重，你已否决   |
+| 租 1d / 30d 长期档  | 65k·1d=6.825 TRX、1天只再生一次 → 等效 6.8 TRX/笔 | —                                               | **比 1h 贵**，不采用 |
 
 → 确认用 **1h 档、按需租**。但出金热钱包是**单一固定地址**，可以比归集多一层优化：
 
 **热钱包「能量池」模式（v0.5 新增）**
+
 ```
 守护协程每 30s 查一次热钱包 GetAccountResource
    若 可用能量 < 低水位(如 3 笔×65k)
         → cheapest 比价，一次性租 k×65k（k 按未来 1 小时预估出金笔数，建议 k=10），期限 1h
         → 该小时内的出金直接消耗池中能量，不再逐笔下单
 ```
+
 好处：单价不变但**订单数从 200/日 降到 ~20/日**（少一堆 API 失败面）、**避开 TronEnergyRent 「<55,000 能量加收 0.25 TRX」的小单附加费**、出金延迟从「等租赁到账 1~10s」变成「几乎为 0」。
 风险：租期内没用完则浪费。中和办法：按**上一小时实际出金笔数 × 1.2** 动态定 k，并监控「租入能量/实际消耗」利用率，低于 70% 就调小 k。低峰期（如凌晨）自动退回逐笔模式。
 
@@ -280,6 +298,7 @@ cost_usd   = cost_trx × TRX_USD
 min_sweep  = cost_usd / target_cost_ratio      // target_cost_ratio 建议 0.5%
 还要满足   min_sweep ≥ cost_usd × 安全倍数(建议 20)   // 防极端行情下归集亏本
 ```
+
 用当前实测值算：`cost = 1.69 + 0.345 = 2.035 TRX ≈ $0.67` → **`min_sweep ≈ 134 USDT`**（按 0.5%）。
 落地方式：定时任务（如每 10 分钟）拉一次两家报价 + 链上 `getEnergyFee` + TRX 价格，重算并写回 `coin.min_sweep`，设上下限保护（如 clamp 到 50~500 USDT），每次变更记录审计日志。
 **另加一条**：低于 `min_sweep` 的余额不是永远不归集 —— 加「陈旧兜底」规则，地址余额 > 0 且超过 N 天（如 30 天）未归集则强制归集一次，避免灰尘长期沉淀在数千个地址上。
@@ -334,25 +353,27 @@ Provider 选路：cheapest 模式下并发报价
 目标：两家平台的预付 TRX 余额自动从**财务地址**补齐，人不在现场也不会因欠费停摆。
 
 **配置（每家平台独立）**
+
 ```yaml
 energy:
   auto_topup:
-    enabled: false            # 总开关，默认关；关闭时只告警不转账
-    source_address: T...      # 资金来源 = 小额 gas 账户（非财务冷钱包）
+    enabled: false # 总开关，默认关；关闭时只告警不转账
+    source_address: T... # 资金来源 = 小额 gas 账户（非财务冷钱包）
     gas_account:
-      target_trx: 20000       # gas 账户常备量（≈ 2 周总消耗，上限即最大失控损失）
+      target_trx: 20000 # gas 账户常备量（≈ 2 周总消耗，上限即最大失控损失）
       low_watermark_trx: 8000 # 低于此值告警，由人工从财务冷钱包定额补（永不自动）
     providers:
       gasstation:
         enabled: true
-        low_watermark_trx: 2000    # 低于此值触发
-        target_trx: 6000           # 补到此值（≈ 10 天量）
+        low_watermark_trx: 2000 # 低于此值触发
+        target_trx: 6000 # 补到此值（≈ 10 天量）
         max_single_topup_trx: 4000 # 单笔上限
-        max_daily_topup_trx: 8000  # 单日上限（硬限，超过则停止并告警）
-        deposit_address: T...      # 白名单：必须与平台接口返回的一致，否则拒绝
+        max_daily_topup_trx: 8000 # 单日上限（硬限，超过则停止并告警）
+        deposit_address: T... # 白名单：必须与平台接口返回的一致，否则拒绝
 ```
 
 **流程**
+
 ```
 守护任务（每 5 分钟）
   → 查两家余额（GasStation /balance；TronEnergyRent /account-info）
@@ -364,6 +385,7 @@ energy:
 ```
 
 **风控（这是一条自动出金通道，必须当提现一样对待）**
+
 1. **收款地址硬白名单**：只能转到配置里写死的 `deposit_address`；**每次补给前重新调接口拉一次平台返回的充值地址并与白名单比对，不一致则拒绝 + 告警**（防平台被入侵/接口被劫持后把钱引到黑地址）。
 2. **三道金额限制**：单笔上限、单日累计上限、单日最大补给次数（如 3 次）。任一触顶 → 停止自动补给并告警，转人工。
 3. **幂等 + 锁**：`topup_record` 建 `uq(provider, date, seq)`，补给任务全局单飞；上一笔未确认到账前不开新笔（否则会因平台入账延迟重复转账）。
@@ -371,6 +393,7 @@ energy:
    ```
    财务冷钱包 ──人工、定额、需审批──▶ gas 账户 ──自动、限额、白名单──▶ 租赁平台充值地址
    ```
+
    - gas 账户是**独立 HD 地址**（与热钱包、归集地址均不复用），私钥同样在 sign-service / KMS，但**只授予向白名单地址转 TRX 这一种签名用途**（sign-service 按 `purpose=topup` 校验：只允许 TRX 转账、只允许白名单 to、金额不超单笔上限，否则拒签）。
    - **风险敏感：即使自动补给逻辑完全失控，最大损失 = gas 账户余额（≈ 2 万 TRX）。**
    - gas 账户自身低水位**只告警、不自动补**，人工从财务冷钱包充（否则等于把冷钱包又接回自动通道）。
@@ -382,18 +405,19 @@ energy:
 ## 10. 提现（业务系统先扣款）
 
 ```
-业务系统扣款+冻结 → 调 wallet-api 下单（biz_order_no 幂等）
+业务系统扣款+冻结 → 调 wallet-api 下单（order_no 幂等）
    → 钱包侧校验：地址合法性 / 非本平台地址 / 热钱包余额 / 单笔单日限额 / 黑名单
    → （可选）大额人工审核
    → 构造交易(设 expiration) → sign-service 签名 → 落库 signed_raw + txid
    → chain-gateway 广播（主备，重发同一份签名）
    → 追确认 → 结果经 outbox 回推业务系统（成功销账 / 失败解冻退款）
 ```
-- **最容易出双花的地方**：同一 `biz_order_no` 只允许存在一份已签名交易；过期前只重发这份；过期且链上查无才允许重构（旧 txid 入历史）。必须写成状态机 + CAS。
+
+- **最容易出双花的地方**：同一 `order_no` 只允许存在一份已签名交易；过期前只重发这份；过期且链上查无才允许重构（旧 txid 入历史）。必须写成状态机 + CAS。
 - **出金热钱包能量走租赁（v0.5 定）**：采用 9.1e 的「能量池 + 批量租」，不质押。能量池补不上时逐笔租，再不行烧 TRX，**三级降级，不允许因能量卡住出金**。
 - **收款方零余额会翻倍**：出金目标地址若从未持有 USDT，能量从 65k 变 131k（成本翻倍）。构造前先查对方 USDT 余额并按两档估能量，否则能量买少了交易会 `OUT_OF_ENERGY` 失败并浪费已付费用。
 - 热钱包余额不足 → 挂起 + 告警，不置失败。
-- 提供「按 biz_order_no 主动查状态」接口，防回调丢失。
+- 提供「按 order_no 主动查状态」接口，防回调丢失。
 
 ## 11. MQ 与部署
 
@@ -432,6 +456,5 @@ energy:
 ## 还需要你确认（1 个）
 
 1. **Nile 阶段用 `trx_burn` 跑通全流程，两家租赁平台等主网小额灰度再验** —— 认可吗？（两家都没有测试环境）
-
 
 确认后即按 v0.5 落地代码（monorepo + 多 entrypoint；先出表结构 + chain-gateway + HD 派生 + 扫描器）。

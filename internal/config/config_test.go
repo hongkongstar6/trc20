@@ -35,8 +35,8 @@ func writeConfig(t *testing.T, body string) string {
 const minimalConfig = `
 mysql_server:
   dsn: "user:pass@tcp(127.0.0.1:3306)/wallet"
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: fullnode
       type: fullnode
       endpoint: http://127.0.0.1:8090
@@ -132,8 +132,8 @@ mysql_server:
   dsn: "${TEST_WALLET_DSN}"
 redis_server:
   addr: "${TEST_UNSET_REDIS:-127.0.0.1:6379}"
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: fullnode
       endpoint: http://127.0.0.1:8090
       enabled: true
@@ -155,8 +155,8 @@ func TestLoadUnsetEnvBecomesEmpty(t *testing.T) {
 	_, err := Load(writeConfig(t, `
 mysql_server:
   dsn: "${TEST_DEFINITELY_UNSET_DSN}"
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: fullnode
       enabled: true
 `))
@@ -173,8 +173,8 @@ func TestLoadEmptyEnvFallsBackToDefault(t *testing.T) {
 	cfg, err := Load(writeConfig(t, `
 mysql_server:
   dsn: "${MYSQL_DSN:-user:pass@tcp(127.0.0.1:3306)/wallet}"
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: fullnode
       enabled: true
 `))
@@ -190,8 +190,8 @@ func TestValidateRequiresAnEnabledNode(t *testing.T) {
 	_, err := Load(writeConfig(t, `
 mysql_server:
   dsn: "dsn"
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: fullnode
       enabled: false
 `))
@@ -242,8 +242,8 @@ func TestNodePriorityAndPeriodsSurvive(t *testing.T) {
 	cfg, err := Load(writeConfig(t, `
 mysql_server:
   dsn: "dsn"
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: trongrid
       type: trongrid
       endpoint: https://nile.trongrid.io
@@ -311,8 +311,8 @@ func TestLoadEnvValueWithYAMLMetacharacters(t *testing.T) {
 	cfg, err := Load(writeConfig(t, `
 mysql_server:
   dsn: "${TEST_WALLET_DSN}"
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: fullnode
       endpoint: "${TEST_NODE_ENDPOINT}"
       enabled: true
@@ -338,8 +338,8 @@ mysql_server:
   dsn: "dsn"
 redis_server:
   db: ${TEST_REDIS_DB}
-chain:
-  nodes:
+scanner_server:
+  chain_nodes:
     - name: fullnode
       enabled: ${TEST_NODE_ENABLED}
 `))

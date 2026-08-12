@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const minimalYAML = "network: nile\nmysql_server:\n  dsn: ${MYSQL_DSN}\nchain:\n  nodes:\n    - name: nile\n      type: fullnode\n      endpoint: https://nile.trongrid.io\n      enabled: true\n" + usdtTokens
+const minimalYAML = "network: nile\nmysql_server:\n  dsn: ${MYSQL_DSN}\nscanner_server:\n  chain_nodes:\n    - name: nile\n      type: fullnode\n      endpoint: https://nile.trongrid.io\n      enabled: true\n" + usdtTokens
 
 func TestLoadDotEnvParsesAndKeepsExistingEnv(t *testing.T) {
 	dir := t.TempDir()

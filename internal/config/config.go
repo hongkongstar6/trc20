@@ -385,7 +385,10 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
 	expandEnvNode(&doc)
-	//var c Config
+	// Decoding merges into the target, so a reload would keep sections the new
+	// file dropped. Reset through the pointer to keep every config.Cfg holder
+	// pointing at the same struct.
+	*Cfg = Config{}
 	if err := doc.Decode(Cfg); err != nil {
 		return nil, fmt.Errorf("decode config %s: %w", path, err)
 	}

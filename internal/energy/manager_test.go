@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/sirupsen/logrus"
 )
@@ -193,5 +194,47 @@ func TestFixedBurnModeRejectsExcludeBurn(t *testing.T) {
 		Resource: ResourceEnergy, Amount: 32000, ExcludeBurn: true})
 	if !errors.Is(err, ErrBurnNotAllowed) {
 		t.Fatalf("err = %v, want ErrBurnNotAllowed", err)
+	}
+}
+
+// With rental switched off in the config the burn provider is the only payer
+// left, so a caller that normally refuses to burn (withdraw, the hot wallet
+// pool) must get the burn quote instead of ErrBurnNotAllowed.
+func TestRentalDisabledIgnoresExcludeBurn(t *testing.T) {
+	off := false
+	cfg := config.EnergyConfig{Mode: "fixed", Fixed: ProviderTRXBurn,
+		DefaultPeriod: "1h", RentalEnabled: &off}
+	mgr := NewManager(cfg, nil, map[string]Provider{
+		"trx_burn": &fakeProvider{name: "trx_burn", cost: 3.2, billed: 32000},
+	})
+	if mgr.RentalEnabled() {
+		t.Fatal("RentalEnabled = true, want false")
+	}
+	q, err := mgr.BestQuote(context.Background(), QuoteRequest{
+		Resource: ResourceEnergy, Amount: 32000, ExcludeBurn: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Provider != ProviderTRXBurn {
+		t.Fatalf("provider = %s, want %s", q.Provider, ProviderTRXBurn)
+	}
+}
+
+func TestBurnCostSunBillsOnlyTheMissingResources(t *testing.T) {
+	params := &chain.ChainParameters{EnergyFeeSun: 210, TransactionFeeSun: 1000}
+	// Nothing on the account: the whole estimate plus the full transfer size.
+	if got, want := BurnCostSun(&chain.AccountResource{}, params, 65000),
+		int64(65000*210+TransferBytes*1000); got != want {
+		t.Fatalf("empty account cost = %d, want %d", got, want)
+	}
+	// A delegation and the free bandwidth quota cover everything.
+	res := &chain.AccountResource{EnergyLimit: 100000, FreeNetLimit: 600}
+	if got := BurnCostSun(res, params, 65000); got != 0 {
+		t.Fatalf("covered account cost = %d, want 0", got)
+	}
+	// Partial cover is billed for the remainder only.
+	res = &chain.AccountResource{EnergyLimit: 60000, EnergyUsed: 5000, FreeNetLimit: 300}
+	if got, want := BurnCostSun(res, params, 65000), int64(10000*210+45*1000); got != want {
+		t.Fatalf("partial cover cost = %d, want %d", got, want)
 	}
 }

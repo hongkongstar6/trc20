@@ -144,7 +144,10 @@ sweep_server:
     stale_days: 14
 
 energy:
-  # Nile: rental platforms have no test environment, so burn TRX.
+  # Nile: rental platforms have no test environment, so burn TRX. With
+  # rental_enabled=false the mode/fixed/providers below are ignored and every
+  # transfer pays its own energy and bandwidth out of the signing address' TRX.
+  rental_enabled: false
   mode: fixed
   fixed: trx_burn
   quote_cache_ttl: 45s

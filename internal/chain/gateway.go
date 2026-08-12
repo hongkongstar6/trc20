@@ -356,8 +356,21 @@ func (g *Gateway) GetTxInfoByBlockNum(ctx context.Context, num int64) ([]TxInfo,
 }
 
 func (g *Gateway) GetTxInfoByID(ctx context.Context, txid string) (*TxInfo, error) {
+	return g.txInfoByID(ctx, txid, false)
+}
+
+// GetTxInfoByIDConfirmed reads the receipt from the solidity node, which only
+// serves solidified blocks. A transaction sitting in an unsolidified block, or
+// one a fork dropped, is reported as absent instead of as an outcome that a
+// reorg could still flip. It falls back to the full node when the deployment
+// has chain.solidity_for_confirm disabled.
+func (g *Gateway) GetTxInfoByIDConfirmed(ctx context.Context, txid string) (*TxInfo, error) {
+	return g.txInfoByID(ctx, txid, true)
+}
+
+func (g *Gateway) txInfoByID(ctx context.Context, txid string, solidity bool) (*TxInfo, error) {
 	var info TxInfo
-	if err := g.call(ctx, g.walletPath("/gettransactioninfobyid", false), map[string]any{"value": txid}, &info); err != nil {
+	if err := g.call(ctx, g.walletPath("/gettransactioninfobyid", solidity), map[string]any{"value": txid}, &info); err != nil {
 		return nil, err
 	}
 	if info.ID == "" {
@@ -365,6 +378,9 @@ func (g *Gateway) GetTxInfoByID(ctx context.Context, txid string) (*TxInfo, erro
 	}
 	return &info, nil
 }
+
+// SolidityConfirm reports whether finality is taken from the solidity node.
+func (g *Gateway) SolidityConfirm() bool { return g.solidityConfirm }
 
 // --------------------------------------------------------------- contract IO
 // 调用接口 https://api.trongrid.io/wallet/triggersmartcontract 返回的完整数据格式

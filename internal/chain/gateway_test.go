@@ -180,6 +180,50 @@ func TestGetTxInfoByIDReturnsNilWhenNotOnChain(t *testing.T) {
 	}
 }
 
+// Withdrawal settlement is only allowed to read an irreversible receipt, so
+// the confirmed lookup has to go to the solidity path, which serves solidified
+// blocks only. Without solidity_for_confirm it falls back to the full node.
+func TestGetTxInfoByIDConfirmedUsesSolidityPath(t *testing.T) {
+	for _, solidity := range []bool{true, false} {
+		var path string
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path = r.URL.Path
+			_, _ = w.Write([]byte(`{"id":"aa","blockNumber":10}`))
+		})
+		srv := httptest.NewServer(h)
+		gw, err := NewGateway(config.ChainConfig{
+			ChainNodes:         []config.NodeConfig{{Name: "n", Endpoint: srv.URL, Enabled: true, Timeout: "5s"}},
+			SolidityForConfirm: solidity,
+		})
+		if err != nil {
+			t.Fatalf("NewGateway: %v", err)
+		}
+		if _, err := gw.GetTxInfoByIDConfirmed(context.Background(), "aa"); err != nil {
+			t.Fatalf("GetTxInfoByIDConfirmed: %v", err)
+		}
+		want := "/wallet/gettransactioninfobyid"
+		if solidity {
+			want = "/walletsolidity/gettransactioninfobyid"
+		}
+		if path != want {
+			t.Fatalf("solidity=%v path = %q, want %q", solidity, path, want)
+		}
+		if gw.SolidityConfirm() != solidity {
+			t.Fatalf("SolidityConfirm() = %v, want %v", gw.SolidityConfirm(), solidity)
+		}
+		// The unconfirmed lookup always reads the full node, otherwise a
+		// broadcast transaction would look absent for a whole minute and be
+		// rebroadcast on every round.
+		if _, err := gw.GetTxInfoByID(context.Background(), "aa"); err != nil {
+			t.Fatalf("GetTxInfoByID: %v", err)
+		}
+		if path != "/wallet/gettransactioninfobyid" {
+			t.Fatalf("unconfirmed path = %q", path)
+		}
+		srv.Close()
+	}
+}
+
 func TestTxInfoSucceeded(t *testing.T) {
 	cases := []struct {
 		name    string

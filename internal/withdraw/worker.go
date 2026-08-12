@@ -467,13 +467,19 @@ func (w *Worker) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	head, err := w.gw.GetNowBlock(ctx)
-	if err != nil {
-		return err
+	var head int64
+	if !w.gw.SolidityConfirm() {
+		// Only the confirm_blocks fallback counts depth from the head; with a
+		// solidity path the node itself decides what is irreversible.
+		block, err := w.gw.GetNowBlock(ctx)
+		if err != nil {
+			return err
+		}
+		head = block.Number()
 	}
 	for i := range rows {
 		row := rows[i]
-		if err := w.reconcileOne(ctx, row, head.Number()); err != nil {
+		if err := w.reconcileOne(ctx, row, head); err != nil {
 			logrus.Error("reconcile withdraw failed", "order_no", row.OrderNo, ",err:", err)
 		}
 	}
@@ -503,24 +509,55 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		return w.finish(ctx, row, model.WithdrawStateFailed, "transaction expired without inclusion",
 			chain.FailExpired, 0, 0, now)
 	}
-	if !info.Succeeded() {
-		reason := info.Receipt.Result
+	// The outcome is only reported once it can no longer change: an
+	// unsolidified receipt still belongs to a block a fork may replace, and the
+	// very same signed bytes could then be included again with a different
+	// result.
+	final, err := w.finalInfo(ctx, row.TxID, head)
+	if err != nil {
+		return err
+	}
+	if final == nil {
+		return nil // on chain, not irreversible yet
+	}
+	if !final.Succeeded() {
+		reason := final.Receipt.Result
 		if reason == "" {
-			reason = info.ResMessage
+			reason = final.ResMessage
 		}
-		failCode := chain.ClassifyReceipt(info)
+		failCode := chain.ClassifyReceipt(final)
 		// The USDT never left the hot wallet, so the order is reported failed and
 		// the business system refunds; withdrawals are never retried on chain
 		// because a second transfer could double pay one business order.
 		logrus.Error("withdraw failed on chain", "order_no", row.OrderNo,
 			"txid", row.TxID, "fail_code", failCode, "reason", reason)
 		return w.finish(ctx, row, model.WithdrawStateFailed, "on-chain failure: "+reason,
-			failCode, info.Receipt.EnergyUsageTotal, info.Fee, now)
+			failCode, final.Receipt.EnergyUsageTotal, final.Fee, now)
+	}
+	return w.finish(ctx, row, model.WithdrawStateConfirmed, "", "", final.Receipt.EnergyUsageTotal, final.Fee, now)
+}
+
+// finalInfo returns the receipt the settlement decision may be based on, or nil
+// while the transaction is not final yet.
+//
+// With chain.solidity_for_confirm the receipt is read from the solidity node,
+// which only serves solidified (irreversible) blocks, so finality is the node's
+// consensus answer instead of a block count that ignores whether the block is
+// still on the main chain. withdraw_server.confirm_blocks only applies to a
+// deployment without a solidity path, where counting depth from the head is the
+// only available approximation.
+func (w *Worker) finalInfo(ctx context.Context, txid string, head int64) (*chain.TxInfo, error) {
+	if w.gw.SolidityConfirm() {
+		return w.gw.GetTxInfoByIDConfirmed(ctx, txid)
+	}
+	info, err := w.gw.GetTxInfoByID(ctx, txid)
+	if err != nil || info == nil {
+		return nil, err
 	}
 	if head-info.BlockNumber < w.confirmBlocks() {
-		return nil
+		return nil, nil
 	}
-	return w.finish(ctx, row, model.WithdrawStateConfirmed, "", "", info.Receipt.EnergyUsageTotal, info.Fee, now)
+	return info, nil
 }
 
 func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) error {

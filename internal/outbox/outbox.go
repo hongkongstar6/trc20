@@ -190,9 +190,11 @@ func (p *HTTPPublisher) Close() error { return nil }
 // -------------------------------------------------------- merchant publisher
 
 // MerchantPublisher delivers an event to the callback URL of the merchant that
-// owns it, signed with that merchant's own sha256 secret. Events without a
-// merchant, and merchants that are switched off or have no callback URL, are
-// skipped: they are still delivered by the platform wide publishers.
+// owns it, signed with that merchant's own sha256 secret. An event carrying its
+// own notify_url (a withdrawal order) is posted there instead of to the
+// merchant wide callback URL. Events without a merchant, and merchants that are
+// switched off or have no callback URL, are skipped: they are still delivered
+// by the platform wide publishers.
 type MerchantPublisher struct {
 	client *http.Client
 }
@@ -217,7 +219,8 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 	if err != nil {
 		return err
 	}
-	if mch.Status != model.MerchantStatusOn || mch.CallbackURL == "" {
+	url := callbackURL(event, mch)
+	if mch.Status != model.MerchantStatusOn || url == "" {
 		logrus.Warn("merchant callback skipped", "merchant_id", event.MerchantID, "status", mch.Status)
 		return nil
 	}
@@ -230,7 +233,7 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, mch.CallbackURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -254,6 +257,16 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 }
 
 func (p *MerchantPublisher) Close() error { return nil }
+
+// callbackURL prefers the URL the event carries: a withdrawal is reported to the
+// notify_url its own order was submitted with, while events without one (a
+// deposit) go to the merchant wide callback URL.
+func callbackURL(event *model.NotifyOutbox, mch *model.Merchant) string {
+	if event.NotifyURL != "" {
+		return event.NotifyURL
+	}
+	return mch.CallbackURL
+}
 
 // Sign is the HMAC used both for outgoing callbacks and incoming API calls.
 func Sign(secret, timestamp string, body []byte) string {

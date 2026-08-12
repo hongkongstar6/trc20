@@ -57,8 +57,8 @@ func (s *Server) Router() *gin.Engine {
 
 	v1.POST("/address", s.createAddress) //获取专属地址
 
-	v1.POST("/withdraw", s.createWithdraw) //玩家发起提现
-	v1.GET("/withdraw/:biz_order_no", s.getWithdraw)
+	v1.POST("/withdraw", s.createWithdraw)           //玩家发起提现
+	v1.GET("/withdraw/:biz_order_no", s.getWithdraw) //查询提现
 
 	v1.GET("/deposits", s.listDeposits) //对账
 	v1.GET("/deposit/:event_id", s.getDeposit)

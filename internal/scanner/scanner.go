@@ -135,6 +135,7 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+
 	if err := s.confirmUpTo(ctx, head.Number()); err != nil {
 		logrus.Error("confirm pass failed", ",err:", err)
 	}
@@ -464,6 +465,7 @@ func (s *Scanner) isInternal(ctx context.Context, from string) (bool, error) {
 
 // confirmUpTo promotes pending records that reached the confirmation depth and
 // enqueues exactly one outbox event per record.
+// 负责把已经达到「确认深度」的 pending（待确认）存款记录提升为 confirmed（已确认），并为每条记录写入恰好一条 outbox 事件
 func (s *Scanner) confirmUpTo(ctx context.Context, head int64) error {
 	limit := head - config.Cfg.Deposit.Confirmations
 	if limit <= 0 {

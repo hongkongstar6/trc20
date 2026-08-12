@@ -19,8 +19,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Cfg = &Config{}
-
 // Config is the root configuration for every entrypoint of the monorepo.
 // Every service reads the same file and only uses the sections it needs.
 type Config struct {
@@ -328,6 +326,7 @@ var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`
 // The yaml is parsed first and the expansion happens on the parsed scalars, so
 // an env value carrying quotes, colons, '#' or newlines can never change the
 // document structure.
+
 func Load1(path string) (*Config, error) {
 	_ = godotenv.Load(".env")
 
@@ -352,6 +351,8 @@ func Load1(path string) (*Config, error) {
 	}
 	return Cfg, nil
 }
+
+var Cfg = &Config{}
 
 func Load(path string) (*Config, error) {
 	if err := loadEnvFileFor(path); err != nil {

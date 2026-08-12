@@ -12,6 +12,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+//专属地址，确认收款流程
+//1. 从数据库表ChainCursor确认已扫过的块的下一个区块开始，调用api获取区块日志
+//2. decodeTransfer():解码trc20的transfer事件，就是地址:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+//3. parseLog():布隆过滤法，查询userWallet,本系统拥有的地址
+//4. 存入数据库表deposit_record,status=Pending 状态为待确认
+//5. confirmUpTo() 待确认的充值记录，超过19个区块后，查询记录的状态，然后把deposit_record的状态设置为已确认
+//6. 数据存入表notify_box,
+//7. api服务从数据库表notify_box中，查找已确认未发送的数据，回调给merchant表的notify_url.
+
 func main() {
 
 	app, err := bootstrap.Init("scanner")

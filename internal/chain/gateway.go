@@ -29,13 +29,6 @@ import (
 // rather than skip work (skipping a block would silently lose deposits).
 var ErrNoNodeAvailable = errors.New("chain: no node available")
 
-type node struct {
-	conf    config.NodeConfig
-	client  *http.Client
-	limiter *limiter
-	cool    cooldown
-}
-
 // Gateway routes JSON HTTP calls to the healthiest node by priority.
 type Gateway struct {
 	nodes            []*node
@@ -46,6 +39,12 @@ type Gateway struct {
 	// node to reopen. Waiting is correct for the scanner (skipping a block
 	// loses deposits), but it must not block a caller forever.
 	rateLimitWait time.Duration
+}
+type node struct {
+	conf    config.NodeConfig
+	client  *http.Client
+	limiter *limiter
+	cool    cooldown
 }
 
 // defaultTronGridQPS stays under the 15 req/s of a free TronGrid key: the key

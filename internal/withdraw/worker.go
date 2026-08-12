@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -50,25 +51,32 @@ type Worker struct {
 	mgr  *energy.Manager
 	pool *energy.Pool
 	//log   *logrus.Logger
-	token config.TokenConfig
+	// tokens are every enabled token, keyed by upper case symbol: an order pays
+	// out the contract of its own symbol, never the first configured one.
+	tokens map[string]config.TokenConfig
 }
 
 func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pool *energy.Pool, log *logrus.Logger) (*Worker, error) {
-	var token config.TokenConfig
-	for _, t := range config.Cfg.Wallet.Tokens {
-		if t.Enabled {
-			token = t
-			break
-		}
+	tokens := map[string]config.TokenConfig{}
+	for _, t := range config.Cfg.EnabledTokens() {
+		tokens[strings.ToUpper(t.Symbol)] = t
 	}
-	if token.Contract == "" {
+	if len(tokens) == 0 {
 		return nil, errors.New("withdraw: no enabled token configured")
 	}
 	if config.Cfg.Wallet.HotWallet.Address == "" || config.Cfg.Wallet.HotWallet.Path == "" {
 		return nil, errors.New("withdraw: wallet.hot_wallet address and path are required")
 	}
 	return &Worker{gw: gw, sign: sign, mgr: mgr, pool: pool, //log: log,
-		token: token}, nil
+		tokens: tokens}, nil
+}
+
+// token resolves the token of an order. A symbol that is no longer configured
+// has no contract to transfer, so the order must be rejected instead of being
+// paid out with whatever token happens to be first in the config.
+func (w *Worker) token(symbol string) (config.TokenConfig, bool) {
+	t, ok := w.tokens[strings.ToUpper(symbol)]
+	return t, ok
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -133,6 +141,10 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	if reason != "" {
 		return w.reject(ctx, row, reason)
 	}
+	token, ok := w.token(row.Symbol)
+	if !ok {
+		return w.reject(ctx, row, "unsupported symbol "+row.Symbol)
+	}
 	amount, ok := new(big.Int).SetString(row.AmountUnits, 10)
 	if !ok || amount.Sign() <= 0 {
 		return w.reject(ctx, row, "invalid amount")
@@ -147,14 +159,14 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	// transfer over the balance reverts on chain and still pays the fee, and the
 	// order must not be failed for it either because the money is only missing
 	// until finance refills the wallet.
-	if err := w.checkBalance(ctx, row, hot.Address, amount); err != nil {
+	if err := w.checkBalance(ctx, row, token, hot.Address, amount); err != nil {
 		return err
 	}
 
 	// The recipient's token state decides the energy tier: an address that
 	// never held USDT needs roughly twice the energy, and underestimating
 	// fails the transaction with OUT_OF_ENERGY while still paying the fee.
-	need, err := w.mgr.EstimateEnergy(ctx, hot.Address, w.token.Contract, data)
+	need, err := w.mgr.EstimateEnergy(ctx, hot.Address, token.Contract, data)
 	if err != nil {
 		logrus.Warn("withdraw energy estimate failed, using worst case", ",err:", err)
 		need = config.Cfg.Energy.EnergyPerTxNew
@@ -177,7 +189,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		}
 	}
 
-	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, w.token.Contract, data, config.Cfg.WithdrawServer.FeeLimitSun)
+	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, token.Contract, data, config.Cfg.WithdrawServer.FeeLimitSun)
 	if err != nil {
 		return err
 	}
@@ -188,7 +200,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		Tx:      tx,
 		Meta: signer.SignMeta{
 			ToAddress:   row.ToAddress,
-			Contract:    w.token.Contract,
+			Contract:    token.Contract,
 			AmountUnits: row.AmountUnits,
 		},
 	})
@@ -293,17 +305,17 @@ func (w *Worker) checkBurnBudget(ctx context.Context, row *model.WithdrawRecord,
 		balance, costSun, need))
 }
 
-// checkBalance verifies the hot wallet still holds enough USDT for this order
-// plus everything already signed or broadcast but not yet confirmed, since
-// those transfers will settle out of the same balance.
-func (w *Worker) checkBalance(ctx context.Context, row *model.WithdrawRecord, from string, amount *big.Int) error {
-	balance, err := w.tokenBalance(ctx, from)
+// checkBalance verifies the hot wallet still holds enough of the order's token
+// for this order plus everything already signed or broadcast but not yet
+// confirmed, since those transfers will settle out of the same balance.
+func (w *Worker) checkBalance(ctx context.Context, row *model.WithdrawRecord, token config.TokenConfig, from string, amount *big.Int) error {
+	balance, err := w.tokenBalance(ctx, token.Contract, from)
 	if err != nil {
 		// A node error is transient: the order stays created and is retried,
 		// but nothing is signed on an unverified balance.
 		return fmt.Errorf("withdraw: hot wallet balance query failed: %w", err)
 	}
-	inflight, err := w.inflightUnits(ctx, from)
+	inflight, err := w.inflightUnits(ctx, token.Contract, from)
 	if err != nil {
 		return err
 	}
@@ -312,17 +324,18 @@ func (w *Worker) checkBalance(ctx context.Context, row *model.WithdrawRecord, fr
 		return nil
 	}
 	return w.halt(ctx, row, FailCodeInsufficientBalance, fmt.Sprintf(
-		"hot wallet USDT balance insufficient: balance=%s required=%s (amount=%s in_flight=%s)",
-		balance.String(), needed.String(), amount.String(), inflight.String()))
+		"hot wallet %s balance insufficient: balance=%s required=%s (amount=%s in_flight=%s)",
+		token.Symbol, balance.String(), needed.String(), amount.String(), inflight.String()))
 }
 
-// inflightUnits sums the orders already signed or broadcast from the address,
-// whose amounts are still going to leave the wallet.
-func (w *Worker) inflightUnits(ctx context.Context, from string) (*big.Int, error) {
+// inflightUnits sums the orders of the same token already signed or broadcast
+// from the address, whose amounts are still going to leave the wallet. Other
+// tokens spend their own balance and must not be counted here.
+func (w *Worker) inflightUnits(ctx context.Context, contract, from string) (*big.Int, error) {
 	var sum string
 	err := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Select("COALESCE(SUM(amount_units),0)").
-		Where("from_address = ? AND status IN ?", from,
+		Where("from_address = ? AND contract = ? AND status IN ?", from, contract,
 			[]string{model.WithdrawStateSigned, model.WithdrawStateBroadcast}).
 		Scan(&sum).Error
 	if err != nil {
@@ -335,12 +348,12 @@ func (w *Worker) inflightUnits(ctx context.Context, from string) (*big.Int, erro
 	return units, nil
 }
 
-func (w *Worker) tokenBalance(ctx context.Context, address string) (*big.Int, error) {
+func (w *Worker) tokenBalance(ctx context.Context, contract, address string) (*big.Int, error) {
 	data, err := tron.EncodeTRC20BalanceOf(address)
 	if err != nil {
 		return nil, err
 	}
-	out, _, err := w.gw.TriggerConstantContract(ctx, address, w.token.Contract, data)
+	out, _, err := w.gw.TriggerConstantContract(ctx, address, contract, data)
 	if err != nil {
 		return nil, err
 	}

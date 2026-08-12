@@ -427,3 +427,23 @@ func TestRentalDisabledPinsBurnAndStopsRentalLoops(t *testing.T) {
 			c.Energy.Pool.Enabled, c.Energy.AutoTopup.Enabled)
 	}
 }
+
+// A business request carries the symbol in whatever case the merchant sent it,
+// so resolving it must ignore case and must never return a disabled token.
+func TestEnabledTokenResolvesSymbolCaseInsensitively(t *testing.T) {
+	c := &Config{Wallet: WalletConfig{Tokens: []TokenConfig{
+		{Symbol: "USDT", Contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Decimals: 6, Enabled: true},
+		{Symbol: "USDC", Contract: "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8", Decimals: 6, Enabled: true},
+		{Symbol: "TUSD", Contract: "TUpMhErZL2fhh4sVNULAbNKLokS4GjC1F4", Decimals: 6},
+	}}}
+	if len(c.EnabledTokens()) != 2 {
+		t.Fatalf("enabled tokens = %d, want 2", len(c.EnabledTokens()))
+	}
+	token, ok := c.EnabledToken("usdc")
+	if !ok || token.Contract != "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8" {
+		t.Fatalf("EnabledToken(usdc) = %+v, %v", token, ok)
+	}
+	if _, ok := c.EnabledToken("tusd"); ok {
+		t.Fatal("a disabled token must not resolve")
+	}
+}

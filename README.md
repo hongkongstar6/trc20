@@ -234,13 +234,15 @@ POST /v1/withdraw {"order_no":"W1","ext_param":"1001","merchant_id":"m1","symbol
 -> {"merchant_id":"m1","order_no":"W1","trade_no":"<uuid>","create_time":1700000000}
 ```
 
-withdraw worker 对账时，交易进块后再等 `withdraw_server.confirm_blocks`（默认 19）
-个区块才结单，**成功和失败都结**，结单与 `notify_outbox` 写入同一个事务，由分发器
+withdraw worker 对账时，只有交易**已固化（不可逆）**才结单：`chain.solidity_for_confirm`
+打开（默认）时回执从 solidity 节点读（`/walletsolidity/gettransactioninfobyid`），
+该节点只返回已固化区块的数据，因此回滚不会翻转已经上报的结果；关掉时退化为从
+最新块数 `withdraw_server.confirm_blocks`（默认 19）个确认块。**成功和失败都结**，结单与 `notify_outbox` 写入同一个事务，由分发器
 投递到该单的 `notify_url`（签名规则与商户回调一致，用商户 `secret`）：
 
 | 订单终态 | `result` | 说明 |
 | --- | --- | --- |
-| `confirmed` | `success` | 交易上链成功且已满 19 个确认块 |
+| `confirmed` | `success` | 交易上链成功且所在区块已固化（约 19 块 / 1 分钟）|
 | `failed` | `failed` | 链上执行失败、广播被永久拒绝、或过期未上链，业务侧退款 |
 | `rejected` | `rejected` | 风控在签名前拒单，链上没有任何交易 |
 

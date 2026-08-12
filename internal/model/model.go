@@ -100,6 +100,7 @@ type DepositRecord struct {
 	MerchantID    string     `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
 	Account       string     `gorm:"column:account;index" json:"account"`
 	Uid           string     `gorm:"column:uid" json:"uid"`
+	TradeNo       string     `gorm:"size:64;uniqueIndex" json:"trade_no"` //交易订单号(我方生成订单号)
 	Chain         string     `gorm:"size:16" json:"chain"`
 	Symbol        string     `gorm:"size:16" json:"symbol"`
 	Contract      string     `gorm:"size:64" json:"contract"`

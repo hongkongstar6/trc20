@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/google/uuid"
 	"github.com/hongkongstar6/trc20/internal/bloom"
 	"github.com/hongkongstar6/trc20/internal/chain"
 	"github.com/hongkongstar6/trc20/internal/config"
@@ -436,6 +437,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 		Account:     wallet.Account,
 		Uid:         wallet.UID,
 		Chain:       "TRON",
+		TradeNo:     uuid.New().String(),
 		Symbol:      t.token.symbol,
 		Contract:    t.contract,
 		TxID:        info.ID,
@@ -531,6 +533,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 			"type":        "deposit",
 			"merchant_id": rec.MerchantID,
 			//"account":      rec.Account,
+			"trade_no":     rec.TradeNo,
 			"uid":          rec.Uid,
 			"chain":        rec.Chain,
 			"symbol":       rec.Symbol,

@@ -536,8 +536,8 @@ func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, r
 		}
 		// The business system is told the outcome of every settled order, success or
 		// failure, on the notify_url it submitted with the order.
-		return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result",
-			row.ExtParam, row.MerchantID, row.NotifyURL, w.event(&row, outcome, reason, now))
+		return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result", row.ExtParam, row.MerchantID, row.NotifyURL,
+			w.event(&row, outcome, reason, now))
 	})
 }
 

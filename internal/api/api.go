@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -152,6 +153,8 @@ type merchantRequest struct {
 	MerchantID  string `json:"merchant_id" binding:"required"`
 	Name        string `json:"name" binding:"required"`
 	CallbackURL string `json:"callback_url" binding:"required"`
+	Symbol      string `json:"symbol" binding:"required"` //币种 usdt / usdc
+	Chain       string `json:"chain" binding:"required"`  //公链类型 tron / eth / ...
 	Secret      string `json:"secret" binding:"required"`
 	Status      *int8  `json:"status"`
 }
@@ -165,6 +168,16 @@ func (s *Server) upsertMerchant(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// A merchant opened for a symbol or chain this gateway cannot serve would
+	// only ever get its address requests refused, so it is refused here.
+	if !strings.EqualFold(req.Chain, model.ChainTRON) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported chain: " + req.Chain})
+		return
+	}
+	if _, ok := config.Cfg.EnabledToken(req.Symbol); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported symbol: " + req.Symbol})
+		return
+	}
 	status := model.MerchantStatusOn
 	if req.Status != nil {
 		status = *req.Status
@@ -173,20 +186,25 @@ func (s *Server) upsertMerchant(c *gin.Context) {
 		MerchantID:  req.MerchantID,
 		Name:        req.Name,
 		CallbackURL: req.CallbackURL,
+		Symbol:      req.Symbol,
+		Chain:       req.Chain,
 		Secret:      req.Secret,
 		Status:      status,
 	}
 	err := store.MyStore.DB.WithContext(c).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "merchant_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"name", "callback_url", "secret", "status", "updated_at",
+			"name", "callback_url", "symbol", "chain", "secret", "status", "updated_at",
 		}),
 	}).Create(&row).Error
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"merchant_id": row.MerchantID, "status": status})
+	c.JSON(http.StatusOK, gin.H{
+		"merchant_id": row.MerchantID, "symbol": row.Symbol,
+		"chain": row.Chain, "status": status,
+	})
 }
 
 func (s *Server) listMerchants(c *gin.Context) {
@@ -205,6 +223,10 @@ func (s *Server) listMerchants(c *gin.Context) {
 // parameters are signed with the merchant secret: sha256 over the parameters
 // sorted by key as "k1=v1&k2=v2" with the secret appended. The derivation index
 // comes from the allocator, never from the uid itself.
+//
+// symbol and chain must be the ones the merchant is registered for: a request
+// for anything else is a misrouted integration, and answering it with an
+// address would credit deposits the merchant never expected.
 func (s *Server) createAddress(c *gin.Context) {
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes()))
 	if err != nil {
@@ -218,8 +240,10 @@ func (s *Server) createAddress(c *gin.Context) {
 	}
 	merchantID := merchant.String(params, "merchant_id")
 	uid := merchant.String(params, "uid")
-	if merchantID == "" || uid == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "merchant_id and uid are required"})
+	symbol := merchant.String(params, "symbol")
+	chain := merchant.String(params, "chain")
+	if merchantID == "" || uid == "" || symbol == "" || chain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "merchant_id, uid, symbol and chain are required"})
 		return
 	}
 	mch, err := merchant.GetEnabled(c, merchantID)
@@ -236,6 +260,24 @@ func (s *Server) createAddress(c *gin.Context) {
 		//c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		//return
 	}
+	if !strings.EqualFold(symbol, mch.Symbol) || !strings.EqualFold(chain, mch.Chain) {
+		logrus.Warn("申请地址失败,币种/公链与商户不一致:", merchantID,
+			",request:", symbol, "/", chain, ",merchant:", mch.Symbol, "/", mch.Chain)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "symbol or chain does not match the merchant configuration",
+		})
+		return
+	}
+	// The merchant row is only the contract with the business system; the gateway
+	// still has to be configured for that token and chain itself.
+	if !strings.EqualFold(chain, model.ChainTRON) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported chain: " + chain})
+		return
+	}
+	if _, ok := config.Cfg.EnabledToken(symbol); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported symbol: " + symbol})
+		return
+	}
 
 	account := merchant.MakeAccount(merchantID, uid)
 	var existing model.UserWallet
@@ -245,7 +287,7 @@ func (s *Server) createAddress(c *gin.Context) {
 	if err == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"merchant_id": merchantID, "uid": uid, "account": account,
-			"address": existing.Address, "chain": existing.Chain,
+			"address": existing.Address, "chain": existing.Chain, "symbol": mch.Symbol,
 		})
 		return
 	}
@@ -284,7 +326,7 @@ func (s *Server) createAddress(c *gin.Context) {
 		if e := store.MyStore.DB.WithContext(c).Where("account = ?", account).Take(&existing).Error; e == nil {
 			c.JSON(http.StatusOK, gin.H{
 				"merchant_id": merchantID, "uid": uid, "account": account,
-				"address": existing.Address, "chain": existing.Chain,
+				"address": existing.Address, "chain": existing.Chain, "symbol": mch.Symbol,
 			})
 			return
 		}
@@ -298,7 +340,7 @@ func (s *Server) createAddress(c *gin.Context) {
 	bloom.NotifyWithRetry(address)
 	c.JSON(http.StatusOK, gin.H{
 		"merchant_id": merchantID, "uid": uid, "account": account,
-		"address": address, "chain": "TRON",
+		"address": address, "chain": model.ChainTRON, "symbol": mch.Symbol,
 	})
 }
 
@@ -347,15 +389,13 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "amount must be a positive integer in minimum units"})
 		return
 	}
-	var token *config.TokenConfig
-	for i := range config.Cfg.Wallet.Tokens {
-		if config.Cfg.Wallet.Tokens[i].Enabled && config.Cfg.Wallet.Tokens[i].Symbol == req.Symbol {
-			token = &config.Cfg.Wallet.Tokens[i]
-			break
-		}
+	if !strings.EqualFold(req.Chain, model.ChainTRON) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported chain: " + req.Chain})
+		return
 	}
-	if token == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported symbol"})
+	token, ok := config.Cfg.EnabledToken(req.Symbol)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported symbol: " + req.Symbol})
 		return
 	}
 
@@ -364,7 +404,7 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		TradeNo:     uuid.New().String(), //生成唯一
 		ExtParam:    req.ExtParam,
 		MerchantID:  req.MerchantId,
-		Chain:       "TRON",
+		Chain:       model.ChainTRON,
 		Symbol:      token.Symbol,
 		Contract:    token.Contract, //智能合约地址
 		ToAddress:   req.ToAddress,

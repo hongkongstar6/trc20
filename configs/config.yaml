@@ -86,6 +86,10 @@ wallet:
           contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t #mainnet USDT-TRC20 代币智能合约转账的地址
           decimals: 6
           enabled: true
+        - symbol: USDC
+          contract: TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8 #mainnet USDC-TRC20 代币合约地址
+          decimals: 6
+          enabled: true
     # 系统地址：withdraw 需要 hot_wallet 的 address+path，sweep 需要 finance_wallet
     hot_wallet:
         address: "${HOT_WALLET_ADDRESS}" #提现付款地址

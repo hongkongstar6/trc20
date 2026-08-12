@@ -280,12 +280,17 @@ withdraw worker 对账时，交易进块后再等 `withdraw_server.confirm_block
 ## 商户
 
 每个用户都归属于一个商户。商户表 `merchant` 的字段为：主键 `id`、商户号
-`merchant_id`、商户名称 `name`、回调地址 `callback_url`、sha256 密钥 `secret`、
+`merchant_id`、商户名称 `name`、回调地址 `callback_url`、币种 `symbol`
+（usdt / usdc）、公链类型 `chain`（tron / eth ...）、sha256 密钥 `secret`、
 状态 `status`（1 开启 / 0 关闭）。`secret` 只写不读，API 不会返回它。
+
+`symbol` + `chain` 是这个商户开通的结算币种：本网关只做 TRON 链，因此新增商户时
+`chain` 必须是 `TRON`，`symbol` 必须是 `wallet.tokens` 里已开启的币种
+（USDT、USDC），否则返回 400。
 
 ```bash
 # 新增/更新商户
-POST /v1/merchant  {"merchant_id":"m1","name":"商户一","callback_url":"https://m1/notify","secret":"sfejo","status":1}
+POST /v1/merchant  {"merchant_id":"m1","name":"商户一","callback_url":"https://m1/notify","symbol":"USDT","chain":"TRON","secret":"sfejo","status":1}
 GET  /v1/merchants
 ```
 
@@ -303,9 +308,15 @@ sign = sha256("a=1&b=2sfejo")
 因此两个商户下的同一个 uid 是两个账号、两个地址。同一账号重复申请会返回
 已分配的地址。
 
+申请时还必须带上 `symbol` 与 `chain`，两者都要和商户表里的字段一致（忽略大小写），
+否则申请失败并返回 400，不会分配地址。
+
 ```bash
-POST /v1/address  {"merchant_id":"m1","uid":"1001","sign":"<sha256>"}
--> {"merchant_id":"m1","uid":"1001","account":"m1_1001","address":"T...","chain":"TRON"}
+POST /v1/address  {"merchant_id":"m1","uid":"1001","symbol":"USDT","chain":"TRON","sign":"<sha256>"}
+-> {"merchant_id":"m1","uid":"1001","account":"m1_1001","address":"T...","chain":"TRON","symbol":"USDT"}
+
+# symbol/chain 与商户不一致
+-> 400 {"error":"symbol or chain does not match the merchant configuration"}
 ```
 
 ## 专属地址匹配（布隆过滤器）

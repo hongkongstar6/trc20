@@ -41,20 +41,30 @@ const (
 
 	MerchantStatusOff int8 = 0
 	MerchantStatusOn  int8 = 1
+
+	// ChainTRON is the only chain this gateway derives addresses and signs
+	// transfers on. A merchant configured for another chain is served by
+	// another gateway, so its address requests are refused here.
+	ChainTRON = "TRON"
 )
 
 // Merchant is the tenant every user belongs to. Its secret signs both the
 // inbound API parameters and the outbound deposit callbacks, so it never leaves
 // the wallet system and is not serialised in API responses.
 type Merchant struct {
-	ID          int64     `gorm:"primaryKey" json:"id"`
-	MerchantID  string    `gorm:"column:merchant_id;size:30;uniqueIndex" json:"merchant_id"`
-	Name        string    `gorm:"size:64" json:"name"`
-	CallbackURL string    `gorm:"size:255" json:"callback_url"`
-	Secret      string    `gorm:"size:128" json:"-"` // sha256 signing key
-	Status      int8      `json:"status"`            // 1 enabled | 0 disabled
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          int64  `gorm:"primaryKey" json:"id"`
+	MerchantID  string `gorm:"column:merchant_id;size:30;uniqueIndex" json:"merchant_id"`
+	Name        string `gorm:"size:64" json:"name"`
+	CallbackURL string `gorm:"size:255" json:"callback_url"`
+	// Symbol and Chain are what the merchant is opened for. An address request
+	// carrying anything else is refused instead of being served an address on a
+	// chain the merchant does not settle on.
+	Symbol    string    `gorm:"size:16" json:"symbol"` // usdt | usdc
+	Chain     string    `gorm:"size:16" json:"chain"`  // tron | eth | ...
+	Secret    string    `gorm:"size:128" json:"-"`     // sha256 signing key
+	Status    int8      `json:"status"`                // 1 enabled | 0 disabled
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (Merchant) TableName() string { return "merchant" }
@@ -203,7 +213,10 @@ func (SweepRecord) TableName() string { return "sweep_record" }
 // wallet that never grows past the threshold still reaches the finance
 // wallet. The row is deleted as soon as the address is swept.
 type SweepSkip struct {
-	Address    string    `gorm:"size:64;primaryKey" json:"address"`
+	Address string `gorm:"size:64;primaryKey" json:"address"`
+	// Contract is the token the counter belongs to: one address holds one
+	// balance per token and each of them crosses the threshold on its own.
+	Contract   string    `gorm:"size:64;primaryKey" json:"contract"`
 	SkipCount  int       `json:"skip_count"`
 	LastSkipAt time.Time `json:"last_skip_at"`
 	CreatedAt  time.Time `json:"created_at"`

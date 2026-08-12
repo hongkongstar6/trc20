@@ -150,6 +150,28 @@ type TokenConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 }
 
+// EnabledTokens are the tokens every worker may touch, in config order.
+func (c *Config) EnabledTokens() []TokenConfig {
+	out := make([]TokenConfig, 0, len(c.Wallet.Tokens))
+	for _, t := range c.Wallet.Tokens {
+		if t.Enabled {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// EnabledToken resolves a symbol to its token, case insensitively so "usdc"
+// from a business request matches "USDC" in the config.
+func (c *Config) EnabledToken(symbol string) (TokenConfig, bool) {
+	for _, t := range c.EnabledTokens() {
+		if strings.EqualFold(t.Symbol, symbol) {
+			return t, true
+		}
+	}
+	return TokenConfig{}, false
+}
+
 type WalletConfig struct {
 	// TRON BIP44 coin type is 195.
 	AccountPath string        `yaml:"account_path"` // e.g. m/44'/195'/0'/0

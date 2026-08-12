@@ -40,24 +40,21 @@ type Service struct {
 	mgr    *energy.Manager
 	pricer *energy.Pricer
 	log    *logrus.Logger
-	token  config.TokenConfig
+	// tokens are every enabled token. Each is swept on its own: one deposit
+	// address can hold a USDT and a USDC balance at the same time and each of
+	// them needs its own transfer, threshold and energy.
+	tokens []config.TokenConfig
 }
 
 func New(gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pricer *energy.Pricer) (*Service, error) {
-	var token config.TokenConfig
-	for _, t := range config.Cfg.Wallet.Tokens {
-		if t.Enabled {
-			token = t
-			break
-		}
-	}
-	if token.Contract == "" {
+	tokens := config.Cfg.EnabledTokens()
+	if len(tokens) == 0 {
 		return nil, errors.New("sweep: no enabled token configured")
 	}
 	if config.Cfg.Wallet.FinanceWallet.Address == "" {
 		return nil, errors.New("sweep: wallet.finance_wallet.address is required")
 	}
-	return &Service{gw: gw, sign: sign, mgr: mgr, pricer: pricer, token: token, log: logrus.StandardLogger()}, nil
+	return &Service{gw: gw, sign: sign, mgr: mgr, pricer: pricer, tokens: tokens, log: logrus.StandardLogger()}, nil
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -81,25 +78,41 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
-// round picks candidate addresses and sweeps them one by one.
+// round sweeps every enabled token, one candidate address at a time.
 func (s *Service) round(ctx context.Context) error {
-	candidates, err := s.candidates(ctx)
+	var firstErr error
+	for _, token := range s.tokens {
+		if err := s.roundToken(ctx, token); err != nil {
+			s.log.Error("sweep round failed", "symbol", token.Symbol, ",err:", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+// roundToken picks the candidate addresses holding one token and sweeps them
+// one by one.
+func (s *Service) roundToken(ctx context.Context, token config.TokenConfig) error {
+	candidates, err := s.candidates(ctx, token)
 	if err != nil {
 		return err
 	}
-	minUnits := s.minSweepUnits()
+	minUnits := s.minSweepUnits(token)
 	maxSkips := config.Cfg.SweepServer.Threshold.MaxSkipRounds
 	for _, addr := range candidates {
-		balance, err := s.tokenBalance(ctx, addr.Address)
+		balance, err := s.tokenBalance(ctx, token.Contract, addr.Address)
 		if err != nil {
-			s.log.Error("balance query failed", "address", addr.Address, ",err:", err)
+			s.log.Error("balance query failed", "address", addr.Address,
+				"symbol", token.Symbol, ",err:", err)
 			continue
 		}
 		if balance.Sign() <= 0 {
 			// Nothing left on chain: a previous sweep already moved the funds but
 			// its deposits were not all marked, so the address would stay a
 			// candidate forever. Close them out here.
-			if err := s.markSweptEmpty(ctx, addr.Address); err != nil {
+			if err := s.markSweptEmpty(ctx, token, addr.Address); err != nil {
 				s.log.Error("marking deposits of an emptied address failed", "address", addr.Address, ",err:", err)
 			}
 			continue
@@ -108,53 +121,56 @@ func (s *Service) round(ctx context.Context) error {
 		// address waits until it was skipped max_skip_rounds times (or went
 		// stale), so small balances still reach the finance wallet eventually.
 		if balance.Cmp(minUnits) < 0 {
-			skips, err := s.recordSkip(ctx, addr.Address)
+			skips, err := s.recordSkip(ctx, token.Contract, addr.Address)
 			if err != nil {
 				s.log.Error("sweep skip counter failed", "address", addr.Address, ",err:", err)
 				continue
 			}
 			forced := maxSkips > 0 && skips >= maxSkips
-			if !forced && !s.isStale(ctx, addr.Address) {
+			if !forced && !s.isStale(ctx, token, addr.Address) {
 				continue
 			}
-			s.log.Info("sweeping below-threshold address", "address", addr.Address,
+			s.log.Info("sweeping below-threshold address", "address", addr.Address, "symbol", token.Symbol,
 				"balance", balance.String(), "min_units", minUnits.String(), "skips", skips)
 		}
-		if err := s.sweepOne(ctx, addr, balance); err != nil {
-			s.log.Error("sweep failed", "address", addr.Address, ",err:", err)
+		if err := s.sweepOne(ctx, token, addr, balance); err != nil {
+			s.log.Error("sweep failed", "address", addr.Address, "symbol", token.Symbol, ",err:", err)
 		}
 	}
 	return nil
 }
 
-// recordSkip counts one more skipped round for the address and returns the new
-// total. The counter is cleared once a sweep of the address is confirmed.
-func (s *Service) recordSkip(ctx context.Context, address string) (int, error) {
+// recordSkip counts one more skipped round for the address and token and
+// returns the new total. The counter is cleared once a sweep of that token from
+// the address is confirmed.
+func (s *Service) recordSkip(ctx context.Context, contract, address string) (int, error) {
 	now := time.Now()
 	err := store.MyStore.DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "address"}},
+		Columns: []clause.Column{{Name: "address"}, {Name: "contract"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"skip_count":   gorm.Expr("skip_count + 1"),
 			"last_skip_at": now,
 			"updated_at":   now,
 		}),
-	}).Create(&model.SweepSkip{Address: address, SkipCount: 1, LastSkipAt: now}).Error
+	}).Create(&model.SweepSkip{Address: address, Contract: contract, SkipCount: 1, LastSkipAt: now}).Error
 	if err != nil {
 		return 0, err
 	}
 	var row model.SweepSkip
-	if err := store.MyStore.DB.WithContext(ctx).Where("address = ?", address).Take(&row).Error; err != nil {
+	if err := store.MyStore.DB.WithContext(ctx).
+		Where("address = ? AND contract = ?", address, contract).Take(&row).Error; err != nil {
 		return 0, err
 	}
 	return row.SkipCount, nil
 }
 
-// candidates are deposit addresses with confirmed unswept deposits.
-func (s *Service) candidates(ctx context.Context) ([]model.UserWallet, error) {
+// candidates are deposit addresses with confirmed unswept deposits of the token.
+func (s *Service) candidates(ctx context.Context, token config.TokenConfig) ([]model.UserWallet, error) {
 	var addresses []string
 	err := store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
 		Distinct("to_address").
-		Where("status = ? AND swept = ? AND internal = ?", model.DepositStateConfirmed, false, false).
+		Where("status = ? AND swept = ? AND internal = ? AND contract = ?",
+			model.DepositStateConfirmed, false, false, token.Contract).
 		Limit(config.Cfg.SweepServer.MaxPerRound).Pluck("to_address", &addresses).Error
 	if err != nil {
 		return nil, err
@@ -170,10 +186,10 @@ func (s *Service) candidates(ctx context.Context) ([]model.UserWallet, error) {
 }
 
 // minSweepUnits converts the runtime USDT threshold into token minimum units.
-func (s *Service) minSweepUnits() *big.Int {
+func (s *Service) minSweepUnits(token config.TokenConfig) *big.Int {
 	usdt := s.pricer.MinSweepUSDT()
 	scale := new(big.Float).SetFloat64(usdt)
-	for i := 0; i < s.token.Decimals; i++ {
+	for i := 0; i < token.Decimals; i++ {
 		scale.Mul(scale, big.NewFloat(10))
 	}
 	out, _ := scale.Int(nil)
@@ -181,14 +197,15 @@ func (s *Service) minSweepUnits() *big.Int {
 }
 
 // isStale allows dust to be swept eventually so it cannot pile up forever.
-func (s *Service) isStale(ctx context.Context, address string) bool {
+func (s *Service) isStale(ctx context.Context, token config.TokenConfig, address string) bool {
 	days := config.Cfg.SweepServer.Threshold.StaleDays
 	if days <= 0 {
 		return false
 	}
 	var oldest model.DepositRecord
 	err := store.MyStore.DB.WithContext(ctx).
-		Where("to_address = ? AND status = ? AND swept = ?", address, model.DepositStateConfirmed, false).
+		Where("to_address = ? AND status = ? AND swept = ? AND contract = ?",
+			address, model.DepositStateConfirmed, false, token.Contract).
 		Order("id asc").Take(&oldest).Error
 	if err != nil {
 		return false
@@ -196,12 +213,12 @@ func (s *Service) isStale(ctx context.Context, address string) bool {
 	return time.Since(oldest.CreatedAt) > time.Duration(days)*24*time.Hour
 }
 
-func (s *Service) tokenBalance(ctx context.Context, address string) (*big.Int, error) {
+func (s *Service) tokenBalance(ctx context.Context, contract, address string) (*big.Int, error) {
 	data, err := tron.EncodeTRC20BalanceOf(address)
 	if err != nil {
 		return nil, err
 	}
-	out, _, err := s.gw.TriggerConstantContract(ctx, address, s.token.Contract, data)
+	out, _, err := s.gw.TriggerConstantContract(ctx, address, contract, data)
 	if err != nil {
 		return nil, err
 	}
@@ -220,19 +237,20 @@ func (s *Service) tokenBalance(ctx context.Context, address string) (*big.Int, e
 // 6.广播交易
 // 7.确认交易
 
-// sweepOne performs the full sweep for a single address under a lock so two
-// workers can never spend the same balance twice.
-func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount *big.Int) error {
-	unlock, ok := store.MyStore.Lock(ctx, "sweep:"+wallet.Address, config.Duration(config.Cfg.SweepServer.LockTTL, 10*time.Minute))
+// sweepOne performs the full sweep of one token from a single address under a
+// lock so two workers can never spend the same balance twice.
+func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet model.UserWallet, amount *big.Int) error {
+	unlock, ok := store.MyStore.Lock(ctx, "sweep:"+token.Contract+":"+wallet.Address, config.Duration(config.Cfg.SweepServer.LockTTL, 10*time.Minute))
 	if !ok {
 		return nil
 	}
 	defer unlock()
 
-	// An in-flight sweep for this address means we must wait for its outcome.
+	// An in-flight sweep of this token from this address means we must wait for
+	// its outcome; a sweep of another token is unrelated and may run alongside.
 	var inflight int64
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).
-		Where("from_address = ? AND status IN ?", wallet.Address,
+		Where("from_address = ? AND contract = ? AND status IN ?", wallet.Address, token.Contract,
 			[]string{model.SweepStateCreated, model.SweepStateEnergyOK, model.SweepStateBroadcast}).
 		Count(&inflight).Error; err != nil {
 		return err
@@ -243,7 +261,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 
 	// A retry after OUT_OF_ENERGY needs more head room than the first attempt,
 	// and an address that keeps failing must stop burning fees.
-	attempts, err := s.energyFailures(ctx, wallet.Address)
+	attempts, err := s.energyFailures(ctx, token.Contract, wallet.Address)
 	if err != nil {
 		return err
 	}
@@ -262,7 +280,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	//第2步：只读预执行估算能量。triggerconstantcontract 不校验发起地址的能量/TRX,
 	//也不返回带 expiration 的交易,所以它可以安全地排在租赁之前
 	factor := energy.RetrySafetyFactor(attempts)
-	need, err := s.mgr.EstimateEnergyFactor(ctx, wallet.Address, s.token.Contract, data, factor)
+	need, err := s.mgr.EstimateEnergyFactor(ctx, wallet.Address, token.Contract, data, factor)
 	if err != nil {
 		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, ",err:", err)
 		need = int64(float64(config.Cfg.Energy.EnergyPerTxNew) * factor)
@@ -279,15 +297,15 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	}
 	// Only the deposits that exist now are covered by this sweep; one that
 	// confirms while it is in flight keeps its unswept flag.
-	depositMaxID, err := s.maxUnsweptDepositID(ctx, wallet.Address)
+	depositMaxID, err := s.maxUnsweptDepositID(ctx, token.Contract, wallet.Address)
 	if err != nil {
 		return err
 	}
 	record := &model.SweepRecord{
 		FromAddress:  wallet.Address,
 		ToAddress:    finance,
-		Symbol:       s.token.Symbol,
-		Contract:     s.token.Contract,
+		Symbol:       token.Symbol,
+		Contract:     token.Contract,
 		AmountUnits:  amount.String(),
 		Status:       model.SweepStateCreated,
 		RetryCount:   attempts,
@@ -313,7 +331,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 
 	//第4步： 请求节点组装一个未签名的智能合约字节码编译以及区块链的实时状态数据
 	//交易对象(智能合约):组装一笔"触发已有 USDT 合约"的指令数据,并检查余额是否够
-	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, s.token.Contract, data, config.Cfg.SweepServer.FeeLimitSun)
+	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, token.Contract, data, config.Cfg.SweepServer.FeeLimitSun)
 	if err != nil {
 		return s.failSweep(ctx, record, chain.FailValidate, err)
 	}
@@ -325,7 +343,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 		Tx:      tx,
 		Meta: signer.SignMeta{
 			ToAddress:   finance,
-			Contract:    s.token.Contract,
+			Contract:    token.Contract,
 			AmountUnits: amount.String(),
 		},
 	})
@@ -363,7 +381,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
 		"status": model.SweepStateBroadcast, "txid": res.TxID, "broadcast_at": now, "updated_at": now,
 	})
-	s.log.Info("sweep broadcast", "address", wallet.Address, "amount", amount.String(),
+	s.log.Info("sweep broadcast", "address", wallet.Address, "symbol", token.Symbol, "amount", amount.String(),
 		"txid", res.TxID, "fee_mode", energy.FeeMode(order.Provider), "cost_trx", order.CostTRX)
 	return nil
 }
@@ -407,20 +425,20 @@ func (s *Service) checkBurnBudget(ctx context.Context, address string, need int6
 	return nil
 }
 
-// energyFailures counts the consecutive OUT_OF_ENERGY failures of an address
-// since its last confirmed sweep, which is the retry attempt number.
-func (s *Service) energyFailures(ctx context.Context, address string) (int, error) {
+// energyFailures counts the consecutive OUT_OF_ENERGY failures of one token on
+// an address since its last confirmed sweep, which is the retry attempt number.
+func (s *Service) energyFailures(ctx context.Context, contract, address string) (int, error) {
 	var lastConfirmed model.SweepRecord
 	err := store.MyStore.DB.WithContext(ctx).
-		Where("from_address = ? AND status = ?", address, model.SweepStateConfirmed).
+		Where("from_address = ? AND contract = ? AND status = ?", address, contract, model.SweepStateConfirmed).
 		Order("id desc").Take(&lastConfirmed).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, err
 	}
 	var count int64
 	err = store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).
-		Where("from_address = ? AND status = ? AND fail_code = ? AND id > ?",
-			address, model.SweepStateFailed, chain.FailOutOfEnergy, lastConfirmed.ID).
+		Where("from_address = ? AND contract = ? AND status = ? AND fail_code = ? AND id > ?",
+			address, contract, model.SweepStateFailed, chain.FailOutOfEnergy, lastConfirmed.ID).
 		Count(&count).Error
 	return int(count), err
 }
@@ -434,10 +452,11 @@ func (s *Service) maxEnergyRetries() int {
 
 // maxUnsweptDepositID is the highest deposit id the current balance can come
 // from. Deposits confirmed after this point are settled by a later sweep.
-func (s *Service) maxUnsweptDepositID(ctx context.Context, address string) (int64, error) {
+func (s *Service) maxUnsweptDepositID(ctx context.Context, contract, address string) (int64, error) {
 	var maxID *int64
 	err := store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
-		Where("to_address = ? AND status = ? AND swept = ?", address, model.DepositStateConfirmed, false).
+		Where("to_address = ? AND contract = ? AND status = ? AND swept = ?",
+			address, contract, model.DepositStateConfirmed, false).
 		Select("MAX(id)").Scan(&maxID).Error
 	if err != nil || maxID == nil {
 		return 0, err
@@ -448,10 +467,10 @@ func (s *Service) maxUnsweptDepositID(ctx context.Context, address string) (int6
 // markSweptEmpty closes out the deposits of an address whose on-chain balance is
 // zero. It only applies once a sweep of that address confirmed, so a balance
 // that never arrived is not written off.
-func (s *Service) markSweptEmpty(ctx context.Context, address string) error {
+func (s *Service) markSweptEmpty(ctx context.Context, token config.TokenConfig, address string) error {
 	var swept int64
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).
-		Where("from_address = ? AND status = ?", address, model.SweepStateConfirmed).
+		Where("from_address = ? AND contract = ? AND status = ?", address, token.Contract, model.SweepStateConfirmed).
 		Count(&swept).Error; err != nil {
 		return err
 	}
@@ -459,7 +478,8 @@ func (s *Service) markSweptEmpty(ctx context.Context, address string) error {
 		return nil
 	}
 	return store.MyStore.DB.WithContext(ctx).Model(&model.DepositRecord{}).
-		Where("to_address = ? AND status = ? AND swept = ?", address, model.DepositStateConfirmed, false).
+		Where("to_address = ? AND contract = ? AND status = ? AND swept = ?",
+			address, token.Contract, model.DepositStateConfirmed, false).
 		UpdateColumns(map[string]any{"swept": true, "updated_at": time.Now()}).Error
 }
 
@@ -528,14 +548,16 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			// deposit that confirmed while the sweep was in flight keeps its
 			// unswept flag and is picked up by the next round.
 			deposits := tx.Model(&model.DepositRecord{}).
-				Where("to_address = ? AND status = ? AND swept = ?", row.FromAddress, model.DepositStateConfirmed, false)
+				Where("to_address = ? AND contract = ? AND status = ? AND swept = ?",
+					row.FromAddress, row.Contract, model.DepositStateConfirmed, false)
 			if row.DepositMaxID > 0 {
 				deposits = deposits.Where("id <= ?", row.DepositMaxID)
 			}
 			if err := deposits.UpdateColumns(map[string]any{"swept": true, "updated_at": now}).Error; err != nil {
 				return err
 			}
-			return tx.Where("address = ?", row.FromAddress).Delete(&model.SweepSkip{}).Error
+			return tx.Where("address = ? AND contract = ?", row.FromAddress, row.Contract).
+				Delete(&model.SweepSkip{}).Error
 		})
 		if err != nil {
 			s.log.Error("sweep reconcile failed", "id", row.ID, ",err:", err)

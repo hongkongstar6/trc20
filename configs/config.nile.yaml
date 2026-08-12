@@ -83,6 +83,11 @@ wallet:
           contract: "${USDT_CONTRACT:-TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf}" #Nile USDT-TRC20 代币合约地址
           decimals: 6
           enabled: true
+        # Nile 没有官方 USDC 合约：自己部署一个 TRC20 测试币后，用 USDC_CONTRACT 指定并打开 enabled
+        - symbol: USDC
+          contract: "${USDC_CONTRACT:-}"
+          decimals: 6
+          enabled: false
     # 系统地址：withdraw 需要 hot_wallet 的 address+path，sweep 需要 finance_wallet
     hot_wallet:
         address: "${HOT_WALLET_ADDRESS}" #提现付款地址

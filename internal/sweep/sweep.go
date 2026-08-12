@@ -259,6 +259,24 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 	if err != nil {
 		return err
 	}
+	//第2步：只读预执行估算能量。triggerconstantcontract 不校验发起地址的能量/TRX,
+	//也不返回带 expiration 的交易,所以它可以安全地排在租赁之前
+	factor := energy.RetrySafetyFactor(attempts)
+	need, err := s.mgr.EstimateEnergyFactor(ctx, wallet.Address, s.token.Contract, data, factor)
+	if err != nil {
+		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, ",err:", err)
+		need = int64(float64(config.Cfg.Energy.EnergyPerTxNew) * factor)
+	}
+	// With rental off the deposit address pays its own energy and bandwidth, and a
+	// deposit address normally holds no TRX: without it the transfer would revert
+	// with OUT_OF_ENERGY, so the address is left for the next round and no sweep
+	// row is written for an attempt that never happened.
+	if !s.mgr.RentalEnabled() {
+		if err := s.checkBurnBudget(ctx, wallet.Address, need); err != nil {
+			s.log.Warn("skipping sweep, the address cannot burn the fee", "address", wallet.Address, ",err:", err)
+			return nil
+		}
+	}
 	// Only the deposits that exist now are covered by this sweep; one that
 	// confirms while it is in flight keeps its unswept flag.
 	depositMaxID, err := s.maxUnsweptDepositID(ctx, wallet.Address)
@@ -279,15 +297,7 @@ func (s *Service) sweepOne(ctx context.Context, wallet model.UserWallet, amount 
 		return err
 	}
 
-	//第2步：只读预执行估算能量。triggerconstantcontract 不校验发起地址的能量/TRX,
-	//也不返回带 expiration 的交易,所以它可以安全地排在租赁之前
-	factor := energy.RetrySafetyFactor(attempts)
-	need, err := s.mgr.EstimateEnergyFactor(ctx, wallet.Address, s.token.Contract, data, factor)
-	if err != nil {
-		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, ",err:", err)
-		need = int64(float64(config.Cfg.Energy.EnergyPerTxNew) * factor)
-	}
-	//第3步：按估算值租赁能量并等委托到账
+	//第3步：按估算值租赁能量并等委托到账（关闭租赁时只登记为烧 TRX）
 	requestID := fmt.Sprintf("sweep-%d", record.ID)
 	order, err := s.mgr.Acquire(ctx, "sweep", wallet.Address, need, requestID)
 	if err != nil {
@@ -369,6 +379,33 @@ func (s *Service) failSweep(ctx context.Context, record *model.SweepRecord, fail
 // FailCodeEnergyRental marks a sweep that never reached the chain because no
 // provider could deliver the energy; nothing was signed or broadcast.
 const FailCodeEnergyRental = "energy_rental"
+
+// checkBurnBudget verifies the address holds enough TRX to pay the missing
+// energy and bandwidth of this transfer itself, which is what
+// energy.rental_enabled=false asks of it.
+func (s *Service) checkBurnBudget(ctx context.Context, address string, need int64) error {
+	params, err := s.gw.GetChainParameters(ctx)
+	if err != nil {
+		return fmt.Errorf("chain parameters query failed: %w", err)
+	}
+	res, err := s.gw.GetAccountResource(ctx, address)
+	if err != nil {
+		return fmt.Errorf("account resource query failed: %w", err)
+	}
+	costSun := energy.BurnCostSun(res, params, need)
+	if limit := config.Cfg.SweepServer.FeeLimitSun; limit > 0 && costSun > limit {
+		return fmt.Errorf("burning TRX costs %d sun, above sweep_server.fee_limit_sun=%d", costSun, limit)
+	}
+	balance, err := s.gw.GetTRXBalance(ctx, address)
+	if err != nil {
+		return fmt.Errorf("TRX balance query failed: %w", err)
+	}
+	if balance < costSun {
+		return fmt.Errorf("TRX insufficient to burn the fee: balance=%d sun required=%d sun (energy=%d)",
+			balance, costSun, need)
+	}
+	return nil
+}
 
 // energyFailures counts the consecutive OUT_OF_ENERGY failures of an address
 // since its last confirmed sweep, which is the retry attempt number.

@@ -23,7 +23,7 @@ const FeeModeBurn = "burn"
 
 // ProviderTRXBurn is the pseudo provider that pays the fee by burning the
 // signer's TRX instead of renting energy.
-const ProviderTRXBurn = "trx_burn"
+const ProviderTRXBurn = config.ProviderTRXBurn
 
 // ErrBurnNotAllowed is returned when the only usable provider would burn TRX
 // but the caller asked for a real rental. Withdrawals use this so a rental
@@ -58,12 +58,20 @@ func NewManager(cfg config.EnergyConfig, gw *chain.Gateway, provs map[string]Pro
 
 func (m *Manager) Providers() map[string]Provider { return m.provs }
 
+// RentalEnabled reports whether third party rental is configured. With rental
+// off every caller pays its fee in TRX, so the burn fallback stops being a
+// fallback and the callers must not treat it as an outage.
+func (m *Manager) RentalEnabled() bool { return m.cfg.RentalOn() }
+
 // BestQuote ranks the enabled providers according to energy.mode. Providers
 // that error out (out of stock, low prepaid balance, unreachable) are simply
 // excluded, and trx_burn always remains as the last resort.
 func (m *Manager) BestQuote(ctx context.Context, req QuoteRequest) (*Quote, error) {
 	if req.Period == "" {
 		req.Period = m.defaultPeriod()
+	}
+	if !m.cfg.RentalOn() {
+		req.ExcludeBurn = false
 	}
 	if m.cfg.Mode == "fixed" {
 		if req.ExcludeBurn && m.cfg.Fixed == ProviderTRXBurn {
@@ -187,6 +195,9 @@ func (m *Manager) AcquireRented(ctx context.Context, purpose, receiver string, n
 }
 
 func (m *Manager) acquire(ctx context.Context, purpose, receiver string, need int64, requestID string, excludeBurn bool) (*model.EnergyRentOrder, error) {
+	if !m.cfg.RentalOn() {
+		excludeBurn = false
+	}
 	quote, err := m.BestQuote(ctx, QuoteRequest{Resource: ResourceEnergy, Amount: need,
 		Period: m.defaultPeriod(), Receiver: receiver, ExcludeBurn: excludeBurn})
 	if err != nil {
@@ -387,6 +398,31 @@ func (m *Manager) EstimateEnergyFactor(ctx context.Context, owner, contract, dat
 		return int64(float64(m.cfg.EnergyPerTxNew) * factor), nil
 	}
 	return int64(float64(used) * factor), nil
+}
+
+// TransferBytes is the size of a TRC20 transfer used for the bandwidth part of
+// the burn estimate. Bandwidth is never rented: 345 bytes cost less than any
+// provider's minimum bandwidth order.
+const TransferBytes = 345
+
+// BurnCostSun estimates what a transfer paying its own fee costs the signing
+// address, given the resources it already holds. Only the missing energy and
+// bandwidth are billed, so an address with a delegation or free quota left is
+// not asked for TRX it does not need.
+func BurnCostSun(res *chain.AccountResource, params *chain.ChainParameters, needEnergy int64) int64 {
+	var haveEnergy, haveBandwidth int64
+	if res != nil {
+		haveEnergy, haveBandwidth = res.AvailableEnergy(), res.AvailableBandwidth()
+	}
+	missingEnergy := needEnergy - haveEnergy
+	if missingEnergy < 0 {
+		missingEnergy = 0
+	}
+	missingBandwidth := int64(TransferBytes) - haveBandwidth
+	if missingBandwidth < 0 {
+		missingBandwidth = 0
+	}
+	return missingEnergy*params.EnergyFeeSun + missingBandwidth*params.TransactionFeeSun
 }
 
 // FeeMode renders the value stored on sweep/withdraw rows.

@@ -389,3 +389,41 @@ func TestShippedConfigHonorsMySQLDSNEnv(t *testing.T) {
 		t.Fatalf("fallback dsn = %q, want the in-file default", cfg.MySQLCf.DSN)
 	}
 }
+
+func TestRentalDefaultsToOn(t *testing.T) {
+	c := &Config{}
+	c.applyDefaults()
+	if !c.Energy.RentalOn() {
+		t.Fatal("RentalOn = false, want true when energy.rental_enabled is unset")
+	}
+	if c.Energy.Mode != "cheapest" {
+		t.Fatalf("mode = %q, want cheapest", c.Energy.Mode)
+	}
+}
+
+// rental_enabled: false has to leave a config that cannot rent anything: the
+// selection is pinned to trx_burn and both rental-only loops are off, whatever
+// the rest of the energy section says.
+func TestRentalDisabledPinsBurnAndStopsRentalLoops(t *testing.T) {
+	off := false
+	c := &Config{Energy: EnergyConfig{
+		RentalEnabled: &off,
+		Mode:          "cheapest",
+		Providers: map[string]ProviderConf{
+			"gasstation": {Enabled: true},
+		},
+		Pool:      EnergyPoolConfig{Enabled: true},
+		AutoTopup: AutoTopupConfig{Enabled: true, SourceAddress: "TWd4WrZ9wn84f5x1hZhL4DHvk738ns5jwb"},
+	}}
+	c.applyDefaults()
+	if c.Energy.Mode != "fixed" || c.Energy.Fixed != ProviderTRXBurn {
+		t.Fatalf("mode/fixed = %q/%q, want fixed/%s", c.Energy.Mode, c.Energy.Fixed, ProviderTRXBurn)
+	}
+	if !c.Energy.Providers[ProviderTRXBurn].Enabled {
+		t.Fatal("trx_burn provider is not enabled")
+	}
+	if c.Energy.Pool.Enabled || c.Energy.AutoTopup.Enabled {
+		t.Fatalf("pool=%v auto_topup=%v, want both disabled",
+			c.Energy.Pool.Enabled, c.Energy.AutoTopup.Enabled)
+	}
+}

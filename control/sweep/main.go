@@ -48,19 +48,26 @@ func main() {
 		}
 	}()
 
-	go func() {
-		if err := mgr.RunReconcile(ctx); err != nil {
-			logrus.Error("energy order reconcile loop stopped", ",err:", err)
-		}
-	}()
-
 	topup := energy.NewTopup(config.Cfg.Energy.AutoTopup, store.MyStore, app.Gateway, signClient, nil,
 		mgr.Providers(), config.Cfg.Wallet.GasAccount.Path)
-	go func() {
-		if err := topup.Run(ctx); err != nil {
-			logrus.Error("topup loop stopped", ",err:", err)
-		}
-	}()
+	// Both loops only exist to serve the rental platforms: with
+	// energy.rental_enabled=false there is no order to reconcile and no prepaid
+	// balance to refill, every sweep burns the deposit address' own TRX.
+	rentalOn := config.Cfg.Energy.RentalOn()
+	if rentalOn {
+		go func() {
+			if err := mgr.RunReconcile(ctx); err != nil {
+				logrus.Error("energy order reconcile loop stopped", ",err:", err)
+			}
+		}()
+		go func() {
+			if err := topup.Run(ctx); err != nil {
+				logrus.Error("topup loop stopped", ",err:", err)
+			}
+		}()
+	} else {
+		logrus.Info("energy rental disabled, sweeps pay their fee by burning TRX")
+	}
 
 	svc, err := sweep.New(app.Gateway, signClient, mgr, pricer)
 	if err != nil {
@@ -78,8 +85,10 @@ func main() {
 				if err := svc.Reconcile(ctx); err != nil {
 					logrus.Error("sweep reconcile failed", ",err:", err)
 				}
-				if err := topup.Reconcile(ctx); err != nil {
-					logrus.Error("topup reconcile failed", ",err:", err)
+				if rentalOn {
+					if err := topup.Reconcile(ctx); err != nil {
+						logrus.Error("topup reconcile failed", ",err:", err)
+					}
 				}
 			}
 		}

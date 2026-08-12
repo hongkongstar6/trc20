@@ -80,6 +80,10 @@ wallet:
     path: "m/44'/195'/3'/0/0"
 
 energy:
+  # Mainnet rents: burning TRX costs several times the rental price per
+  # transfer. rental_enabled=false is for Nile and for an operator who
+  # deliberately wants to pay every fee in TRX.
+  rental_enabled: true
   # Real comparison shopping across the enabled providers, burning TRX only
   # when every rental fails.
   mode: cheapest

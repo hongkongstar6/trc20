@@ -159,6 +159,11 @@ sweep_server:
         stale_days: 14
 
 energy:
+    # 是否向第三方平台租赁能量/带宽。默认 true；改成 false 后不再租赁，
+    # 每笔转账直接烧发起地址自己的 TRX（此时 mode/fixed/providers/pool/
+    # auto_topup 全部被忽略：mode 固定为 fixed + trx_burn，能量池与预付余额
+    # 自动充值关闭）。Nile 测试网只能用 false，两家租赁平台都没有测试环境。
+    rental_enabled: true
     # Real comparison shopping across the enabled providers, burning TRX only
     # when every rental fails.
     mode: cheapest

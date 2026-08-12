@@ -33,6 +33,9 @@ const FailCodeRejected = "risk_rejected"
 const (
 	FailCodeInsufficientBalance = "hot_wallet_insufficient"
 	FailCodeEnergyRental        = "energy_rental_failed"
+	// FailCodeInsufficientTRX is only used with energy.rental_enabled=false,
+	// where the transfer burns the hot wallet's own TRX for energy and bandwidth.
+	FailCodeInsufficientTRX = "hot_wallet_trx_insufficient"
 )
 
 // ErrHalted stops the current round for an order without failing it: the order
@@ -156,7 +159,14 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		logrus.Warn("withdraw energy estimate failed, using worst case", ",err:", err)
 		need = config.Cfg.Energy.EnergyPerTxNew
 	}
-	if w.pool == nil || !w.pool.HasEnergyFor(ctx, need) {
+	if !w.mgr.RentalEnabled() {
+		// energy.rental_enabled=false: nothing is rented, the transfer pays its
+		// own energy and bandwidth out of the hot wallet's TRX, so the TRX has to
+		// be there before anything is signed.
+		if err := w.checkBurnBudget(ctx, row, hot.Address, need); err != nil {
+			return err
+		}
+	} else if w.pool == nil || !w.pool.HasEnergyFor(ctx, need) {
 		requestID := fmt.Sprintf("withdraw-%d", row.ID)
 		// Burning TRX is never an acceptable fallback here: it silently drains
 		// the hot wallet's TRX at several times the rental price, so a rental
@@ -248,6 +258,39 @@ func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid 
 	}
 	logrus.Info("withdraw broadcast", "id", id, "txid", txid, "duplicated", result.Duplicated)
 	return nil
+}
+
+// checkBurnBudget verifies the hot wallet can pay this transfer's energy and
+// bandwidth out of its own TRX. Signing without it would broadcast a transfer
+// that reverts with OUT_OF_ENERGY and still charges whatever TRX was there, so
+// the order is halted (funds intact, retried after a refill) instead.
+func (w *Worker) checkBurnBudget(ctx context.Context, row *model.WithdrawRecord, from string, need int64) error {
+	params, err := w.gw.GetChainParameters(ctx)
+	if err != nil {
+		return fmt.Errorf("withdraw: chain parameters query failed: %w", err)
+	}
+	res, err := w.gw.GetAccountResource(ctx, from)
+	if err != nil {
+		return fmt.Errorf("withdraw: hot wallet resource query failed: %w", err)
+	}
+	costSun := energy.BurnCostSun(res, params, need)
+	if limit := config.Cfg.WithdrawServer.FeeLimitSun; limit > 0 && costSun > limit {
+		return w.halt(ctx, row, FailCodeInsufficientTRX, fmt.Sprintf(
+			"burning TRX for this transfer costs %d sun, above withdraw_server.fee_limit_sun=%d",
+			costSun, limit))
+	}
+	balance, err := w.gw.GetTRXBalance(ctx, from)
+	if err != nil {
+		return fmt.Errorf("withdraw: hot wallet TRX balance query failed: %w", err)
+	}
+	if balance >= costSun {
+		logrus.Info("withdraw pays its fee by burning TRX", "order_no", row.OrderNo,
+			"energy_need", need, "cost_sun", costSun, "trx_balance_sun", balance)
+		return nil
+	}
+	return w.halt(ctx, row, FailCodeInsufficientTRX, fmt.Sprintf(
+		"hot wallet TRX insufficient to burn the fee: balance=%d sun required=%d sun (energy=%d)",
+		balance, costSun, need))
 }
 
 // checkBalance verifies the hot wallet still holds enough USDT for this order

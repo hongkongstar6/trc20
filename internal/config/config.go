@@ -232,7 +232,16 @@ type SweepThresholdConfig struct {
 	MaxSkipRounds int `yaml:"max_skip_rounds"`
 }
 
+// ProviderTRXBurn is the pseudo provider that pays the fee by burning the
+// signing address' TRX instead of renting energy from a platform.
+const ProviderTRXBurn = "trx_burn"
+
 type EnergyConfig struct {
+	// RentalEnabled decides whether energy and bandwidth are rented from a third
+	// party platform. Unset means true, so an existing config keeps renting; false
+	// makes every transfer pay its own fee by burning the signing address' TRX,
+	// which is the only option on Nile because no platform serves the testnet.
+	RentalEnabled *bool `yaml:"rental_enabled"`
 	// Mode: cheapest | priority | fixed
 	Mode           string `yaml:"mode"`
 	Fixed          string `yaml:"fixed"`
@@ -251,6 +260,9 @@ type EnergyConfig struct {
 	Pool              EnergyPoolConfig        `yaml:"pool"`
 	AutoTopup         AutoTopupConfig         `yaml:"auto_topup"`
 }
+
+// RentalOn reports whether third party rental is in use.
+func (c EnergyConfig) RentalOn() bool { return c.RentalEnabled == nil || *c.RentalEnabled }
 
 type ProviderConf struct {
 	Enabled bool `yaml:"enabled"`
@@ -540,6 +552,21 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Energy.Mode == "" {
 		c.Energy.Mode = "cheapest"
+	}
+	if !c.Energy.RentalOn() {
+		// trx_burn is the only way left to pay a fee, so the selection is pinned
+		// to it and everything that only exists to serve the rental platforms
+		// (the hot wallet energy pool, the prepaid balance topup) is shut down.
+		c.Energy.Mode = "fixed"
+		c.Energy.Fixed = ProviderTRXBurn
+		if c.Energy.Providers == nil {
+			c.Energy.Providers = map[string]ProviderConf{}
+		}
+		burn := c.Energy.Providers[ProviderTRXBurn]
+		burn.Enabled = true
+		c.Energy.Providers[ProviderTRXBurn] = burn
+		c.Energy.Pool.Enabled = false
+		c.Energy.AutoTopup.Enabled = false
 	}
 	if c.Energy.EnergyPerTx <= 0 {
 		c.Energy.EnergyPerTx = 32000

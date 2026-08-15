@@ -36,6 +36,7 @@ api_server:
     allowed_ips:
         - "10.0.0.11"
         - "127.0.0.1"
+        - "172.18.0.1" #docker内部地址
     signature_skew: 5m
     nonce_ttl: 10m
 

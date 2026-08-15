@@ -98,7 +98,7 @@ func (s *Server) ipAllowlist() gin.HandlerFunc {
 			return
 		}
 		if !allowed[c.ClientIP()] {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "ip not allowed"})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "ip not allowed" + c.ClientIP()})
 			return
 		}
 		c.Next()
@@ -304,7 +304,7 @@ func (s *Server) createAddress(c *gin.Context) {
 
 	address, err := s.sign.DeriveAddress(c, path)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "derive failed: " + err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "请求签名服,derive failed: " + err.Error()})
 		return
 	}
 	logrus.Info("生成地址的路径:", account, path, address)

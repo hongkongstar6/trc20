@@ -153,9 +153,9 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 	for i := range fetched {
 		num := from + int64(i)
 		if fetched[i].err != nil {
+			logrus.Error("当前区块读取失败:", num)
 			return false, fmt.Errorf("block %d: %w", num, fetched[i].err)
 		}
-		logrus.Debug("当前区块读取成功:", num)
 
 		block := fetched[i].block
 		if cursor.BlockHash != "" && block.BlockHeader.RawData.ParentHash != "" &&
@@ -406,7 +406,7 @@ func (s *Scanner) decodeTransfer(lg chain.TxLog) (*transfer, bool) {
 
 // parseLog validates one log entry and resolves the owning user.
 func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxLog, idx int, block *chain.Block, blockTime time.Time) (*model.DepositRecord, bool, error) {
-	t, ok := s.decodeTransfer(lg)
+	t, ok := s.decodeTransfer(lg) //检查智能合约地址
 	if !ok {
 		return nil, false, nil
 	}
@@ -416,7 +416,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 		logrus.Debug("地址不属于本系统：", t.to)
 		return nil, false, nil
 	}
-	logrus.Info("发起地址:", t.from, "收款地址:", t.to)
+	//logrus.Info("发起地址:", t.from, "收款地址:", t.to)
 	var wallet model.UserWallet
 	err := store.MyStore.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

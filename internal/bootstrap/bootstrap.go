@@ -36,6 +36,8 @@ type App struct {
 func Init(service string) (*App, error) {
 	path := flag.String("config", envOr("CONFIG_PATH", defaultConfigPath()), "path to the config file")
 
+	//path := flag.String("config", "configs/config.nile.yaml", "path to the config file")
+
 	migrate := flag.Bool("migrate", true, "run schema auto migration and exit")
 	flag.Parse()
 
@@ -108,12 +110,13 @@ func Context() (context.Context, context.CancelFunc) {
 // example) by walking up from the working directory, so debugging a cmd/* from
 // an IDE works without passing -config.
 func defaultConfigPath() string {
-	for _, name := range []string{"configs/config.yaml", "configs/config.nile.yaml"} {
-		if p, ok := config.FindUp("", name); ok {
-			return p
-		}
-	}
-	return "configs/config.yaml"
+	return "configs/config.nile.yaml"
+	// for _, name := range []string{"configs/config.yaml", "configs/config.nile.yaml"} {
+	// 	if p, ok := config.FindUp("", name); ok {
+	// 		return p
+	// 	}
+	// }
+	// return "configs/config.yaml"
 }
 
 func envOr(key, def string) string {

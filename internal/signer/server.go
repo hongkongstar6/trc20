@@ -167,8 +167,14 @@ type dbAudit struct {
 
 func (a *dbAudit) Record(ctx context.Context, purpose, path, address, txid, caller string, allowed bool, reason string) {
 	row := &model.SignAudit{
-		Purpose: purpose, Path: path, Address: address, TxID: txid,
-		Caller: caller, Allowed: allowed, Reason: reason, CreatedAt: time.Now(),
+		Purpose:   purpose,
+		Path:      path,
+		Address:   address,
+		TxID:      txid,
+		Caller:    caller,
+		Allowed:   allowed,
+		Reason:    reason,
+		CreatedAt: time.Now(),
 	}
 	if err := store.MyStore.DB.WithContext(ctx).Create(row).Error; err != nil {
 		// Audit must never silently vanish, but it must not block signing of a

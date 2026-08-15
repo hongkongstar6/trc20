@@ -44,7 +44,7 @@ type SignMeta struct {
 }
 
 type SignResponse struct {
-	TxID string            `json:"txid"`
+	TxID string            `json:"txid"` //交易哈希,客户端私钥签名后生成的整个数据进行哈希计算
 	Tx   *tron.Transaction `json:"tx"`
 }
 

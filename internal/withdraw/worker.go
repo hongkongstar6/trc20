@@ -212,7 +212,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
 		UpdateColumns(map[string]any{
 			"status":       model.WithdrawStateSigned,
-			"txid":         signed.TxID,
+			"txid":         signed.TxID, //交易哈希
 			"signed_raw":   signed.Tx.RawDataHex,
 			"from_address": hot.Address,
 			"expired_at":   expiry,

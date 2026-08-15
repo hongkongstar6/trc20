@@ -61,6 +61,7 @@ func main() {
 			}
 		}()
 		go func() {
+			//向第三方充值能量
 			if err := topup.Run(ctx); err != nil {
 				logrus.Error("topup loop stopped", ",err:", err)
 			}

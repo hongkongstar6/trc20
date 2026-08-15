@@ -50,9 +50,9 @@ sign_server:
     passphrase: "${WALLET_PASSPHRASE:-}" #口令
     tls:
         enabled: true
-        cert_file: ./etc/wallet/tls/sign.crt
-        key_file: ./etc/wallet/tls/sign.key
-        ca_file: ./etc/wallet/tls/ca.crt
+        cert_file: ./tls/sign.crt
+        key_file: ./tls/sign.key
+        ca_file: ./tls/ca.crt
         server_name: sign.internal
 
 scanner_server: #扫块配置节点

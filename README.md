@@ -110,15 +110,15 @@ CONFIG_PATH=configs/config.nile.yaml ./bin/api
 
 启动时会自动加载 `.env`：优先取 `ENV_FILE` 指定的文件，否则从配置文件所在目录
 （再退回当前工作目录）向上查找最近的 `.env`。已存在的真实环境变量优先，文件不存在
-也不会报错。未传 `-config` / `CONFIG_PATH` 时，会向上查找 `configs/config.yaml`，
-找不到再回退到 `configs/config.nile.yaml`，因此在 VS Code 里直接调试 `cmd/*`
-无需额外参数（`.vscode/launch.json` 已提供各服务的调试配置）。
+也不会报错。未传 `-config` / `CONFIG_PATH` 时，会向上查找 `configs/config.nile.yaml`，
+因此在 VS Code 里直接调试 `cmd/*` 无需额外参数（`.vscode/launch.json` 已提供各服务的
+调试配置）。
 
-在 Nile 上跑必须显式指定 `configs/config.nile.yaml`：`configs/config.yaml` 是主网配置
-（主网节点 + 主网 USDT 合约），用它连测试网时 scanner 会照常轮询 Nile 区块，但每条
-Transfer 日志的合约都不在白名单里而被丢弃——充值永远扫不到且日志无异常。为此启动时会
-校验 `network` 与已启用节点所属网络是否一致，scanner 还会在开始扫块前确认
-`wallet.tokens` 里的合约在所连链上存在，不一致直接退出。
+默认是测试网，跑主网必须显式指定 `-config configs/config.yaml` 或 `CONFIG_PATH`：
+`configs/config.yaml` 是主网配置（主网节点 + 主网 USDT 合约），用它连测试网时 scanner
+会照常轮询 Nile 区块，但每条 Transfer 日志的合约都不在白名单里而被丢弃——充值永远扫不到
+且日志无异常。为此启动时会校验 `network` 与已启用节点所属网络是否一致，scanner 还会在
+开始扫块前确认 `wallet.tokens` 里的合约在所连链上存在，不一致直接退出。
 
 Nile 配置中的两个属性是有意为之：
 

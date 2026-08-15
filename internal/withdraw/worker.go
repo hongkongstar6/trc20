@@ -93,6 +93,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		<-ctx.Done()
 		return nil
 	}
+	w.preflight(ctx)
 	interval := config.Duration(config.Cfg.WithdrawServer.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -109,6 +110,43 @@ func (w *Worker) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 		}
+	}
+}
+
+// preflight reports, once at startup, everything a payout depends on outside of
+// the order itself: which address pays, whether sign-service really owns it,
+// and whether it holds the token and the TRX the transfers spend. A withdrawal
+// that never arrives is almost always one of these, and without this line the
+// only symptom is orders sitting in created with a halt reason.
+func (w *Worker) preflight(ctx context.Context) {
+	hot := config.Cfg.Wallet.HotWallet
+	if addr, err := w.sign.DeriveAddress(ctx, hot.Path); err != nil {
+		logrus.Warn("withdraw preflight: 无法向 sign 服务派生热钱包地址", ",path:", hot.Path, ",err:", err)
+	} else if addr != hot.Address {
+		// The signer refuses every withdrawal in this state, so it is reported as
+		// an error rather than left for the first order to discover.
+		logrus.Error("withdraw preflight: wallet.hot_wallet.address 与助记词在 ", hot.Path,
+			" 上派生的地址不一致，提现会被 sign 服务拒签", ",configured:", hot.Address, ",derived:", addr)
+	}
+	if addr := config.Cfg.Wallet.SweepWallet.Address; addr != "" && addr == hot.Address {
+		logrus.Warn("withdraw preflight: 热钱包与归集钱包是同一个地址，提现从归集地址付款",
+			",address:", hot.Address, ",path:", hot.Path)
+	}
+	for _, token := range w.tokens {
+		balance, err := w.tokenBalance(ctx, token.Contract, hot.Address)
+		if err != nil {
+			logrus.Warn("withdraw preflight: 热钱包余额查询失败", ",symbol:", token.Symbol, ",err:", err)
+			continue
+		}
+		logrus.Info("withdraw preflight", ",hot_wallet:", hot.Address, ",path:", hot.Path,
+			",symbol:", token.Symbol, ",contract:", token.Contract,
+			",balance_units:", balance.String(), ",balance:", amountText(balance.String(), token.Decimals))
+	}
+	if trx, err := w.gw.GetTRXBalance(ctx, hot.Address); err != nil {
+		logrus.Warn("withdraw preflight: 热钱包 TRX 余额查询失败", ",err:", err)
+	} else {
+		logrus.Info("withdraw preflight", ",hot_wallet:", hot.Address, ",trx_balance_sun:", trx,
+			",rental_enabled:", w.mgr.RentalEnabled(), ",fee_limit_sun:", config.Cfg.WithdrawServer.FeeLimitSun)
 	}
 }
 
@@ -216,8 +254,14 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		},
 	})
 	if err != nil {
+		logrus.Error("withdraw sign failed", ",order_no:", row.OrderNo, ",from_address:", hot.Address,
+			",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits, ",err:", err)
 		return err
 	}
+	// 签名成功：打印收款地址与金额，方便对着链上交易核对这笔提现付给了谁、付了多少。
+	logrus.Info("withdraw sign ok", ",order_no:", row.OrderNo, ",from_address:", hot.Address,
+		",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
+		",amount:", amountText(row.AmountUnits, row.Decimals), ",txid:", signed.TxID)
 	expiry := time.Now().Add(time.Duration(w.expirationSeconds()) * time.Second)
 	res := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
@@ -279,8 +323,30 @@ func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid 
 	if w.pool != nil {
 		w.pool.RecordUsage(1)
 	}
-	logrus.Info("withdraw broadcast", ",id:", id, ",txid:", txid, ",duplicated:", result.Duplicated)
+	// 广播成功：同样打印收款地址与金额，这是订单离开本系统前的最后一条记录。
+	logrus.Info("withdraw broadcast ok", ",order_no:", row.OrderNo, ",id:", id,
+		",from_address:", row.FromAddress, ",to_address:", row.ToAddress, ",symbol:", row.Symbol,
+		",amount_units:", row.AmountUnits, ",amount:", amountText(row.AmountUnits, row.Decimals),
+		",txid:", txid, ",duplicated:", result.Duplicated)
 	return nil
+}
+
+// amountText renders the minimum-unit amount as a human readable token amount
+// (1000000 with 6 decimals -> "1"), so an operator reading the log sees the
+// same number the merchant asked for instead of counting zeros. The raw units
+// are always logged next to it.
+func amountText(units string, decimals int) string {
+	value, ok := new(big.Int).SetString(units, 10)
+	if !ok || decimals < 0 {
+		return units
+	}
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	whole, frac := new(big.Int).QuoRem(value, scale, new(big.Int))
+	if decimals == 0 || frac.Sign() == 0 {
+		return whole.String()
+	}
+	digits := strings.TrimRight(fmt.Sprintf("%0*s", decimals, frac.String()), "0")
+	return whole.String() + "." + digits
 }
 
 // checkBurnBudget verifies the hot wallet can pay this transfer's energy and
@@ -610,6 +676,9 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 			"receipt succeeded but no matching Transfer event was emitted",
 			chain.FailNoTransfer, final.Receipt.EnergyUsageTotal, final.Fee, now)
 	}
+	logrus.Info("withdraw confirmed", ",order_no:", row.OrderNo, ",from_address:", row.FromAddress,
+		",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
+		",amount:", amountText(row.AmountUnits, row.Decimals), ",txid:", row.TxID, ",fee_sun:", final.Fee)
 	return w.finish(ctx, row, model.WithdrawStateConfirmed, "", "", final.Receipt.EnergyUsageTotal, final.Fee, now)
 }
 
@@ -692,6 +761,9 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 	}
 	res, err := w.gw.Broadcast(ctx, signed.Tx)
 	if err == nil {
+		logrus.Info("withdraw rebroadcast ok", ",order_no:", row.OrderNo, ",from_address:", row.FromAddress,
+			",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
+			",amount:", amountText(row.AmountUnits, row.Decimals), ",txid:", row.TxID)
 		return nil
 	}
 	// A permanent rejection cannot become valid, so the order is settled now

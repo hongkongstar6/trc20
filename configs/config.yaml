@@ -63,9 +63,9 @@ sign_server:
 scanner_server: #扫块配置节点
     # FullNode first once it is ready; TronGrid stays as the failover.
     chain_nodes:
-        - name: testnode #测试节点
-          type: testnode
-          endpoint: "https://nile.trongrid.io" #"${FULLNODE_ENDPOINT}" #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
+        - name: fullnode #主网节点：network: mainnet 时这里必须是主网节点，
+          type: trongrid # 否则扫的是别的链，wallet.tokens 的主网合约永远匹配不到（进程启动时会直接报错退出）
+          endpoint: "${FULLNODE_ENDPOINT:-https://api.trongrid.io}" #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
           priority: 1
           enabled: true
           timeout: 10s

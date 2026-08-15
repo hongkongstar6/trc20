@@ -382,6 +382,16 @@ func (g *Gateway) txInfoByID(ctx context.Context, txid string, solidity bool) (*
 // SolidityConfirm reports whether finality is taken from the solidity node.
 func (g *Gateway) SolidityConfirm() bool { return g.solidityConfirm }
 
+// Endpoints lists the enabled node endpoints in priority order, so an error
+// message can name the chain the process is actually talking to.
+func (g *Gateway) Endpoints() []string {
+	out := make([]string, 0, len(g.nodes))
+	for _, n := range g.nodes {
+		out = append(out, n.conf.Endpoint)
+	}
+	return out
+}
+
 // --------------------------------------------------------------- contract IO
 // 调用接口 https://api.trongrid.io/wallet/triggersmartcontract 返回的完整数据格式
 type TriggerResultDetail struct {
@@ -425,6 +435,23 @@ type triggerResult struct {
 	ConstantResult []string          `json:"constant_result"`
 	Transaction    *tron.Transaction `json:"transaction"`
 	EnergyUsed     int64             `json:"energy_used"` //本次交易需要的能量,但是不会显示消耗的带宽量
+}
+
+// ContractExists reports whether the node knows a contract at addr. The node
+// answers an empty object for an address that carries no contract code, which
+// is what a contract of another network looks like from here.
+func (g *Gateway) ContractExists(ctx context.Context, addr string) (bool, error) {
+	hexAddr, err := tron.AddressToHex(addr)
+	if err != nil {
+		return false, err
+	}
+	var out struct {
+		ContractAddress string `json:"contract_address"`
+	}
+	if err := g.call(ctx, g.walletPath("/getcontract", false), map[string]any{"value": hexAddr}, &out); err != nil {
+		return false, err
+	}
+	return out.ContractAddress != "", nil
 }
 
 // TriggerConstantContract performs a read-only contract call and also returns

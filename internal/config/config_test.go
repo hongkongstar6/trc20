@@ -125,6 +125,73 @@ func TestCommittedConfigsCarryTheUSDTAllowlist(t *testing.T) {
 	}
 }
 
+// A mainnet allowlist against a Nile node (or the reverse) leaves the scanner
+// polling blocks whose transfers can never match a contract, so no deposit is
+// ever recorded and nothing in the logs says why.
+func TestValidateRejectsNodeOfAnotherNetwork(t *testing.T) {
+	_, err := Load(writeConfig(t, `
+network: mainnet
+mysql_server:
+  dsn: "user:pass@tcp(127.0.0.1:3306)/wallet"
+scanner_server:
+  chain_nodes:
+    - name: testnode
+      type: testnode
+      endpoint: "https://nile.trongrid.io"
+      priority: 1
+      enabled: true
+`))
+	if err == nil || !strings.Contains(err.Error(), "serves") {
+		t.Fatalf("error = %v, want a network mismatch error", err)
+	}
+}
+
+func TestValidateAcceptsMatchingNetworkAndDisabledMismatch(t *testing.T) {
+	if _, err := Load(writeConfig(t, `
+network: nile
+mysql_server:
+  dsn: "user:pass@tcp(127.0.0.1:3306)/wallet"
+scanner_server:
+  chain_nodes:
+    - name: testnode
+      type: testnode
+      endpoint: "https://nile.trongrid.io/"
+      priority: 1
+      enabled: true
+    - name: trongrid
+      type: trongrid
+      endpoint: "https://api.trongrid.io"
+      priority: 2
+      enabled: false
+`)); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}
+
+// The committed configs are the ones the deployments run, so their node list
+// and their token allowlist have to belong to the same chain.
+func TestCommittedConfigsMatchTheirNetwork(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "user:pass@tcp(127.0.0.1:3306)/wallet")
+	want := map[string]string{"config.yaml": "mainnet", "config.nile.yaml": "nile"}
+	for name, network := range want {
+		cfg, err := Load(filepath.Join("..", "..", "configs", name))
+		if err != nil {
+			t.Fatalf("Load %s: %v", name, err)
+		}
+		if cfg.Network != network {
+			t.Fatalf("%s: network = %s, want %s", name, cfg.Network, network)
+		}
+		for _, n := range cfg.ScannerServer.ChainNodes {
+			if !n.Enabled {
+				continue
+			}
+			if got, known := endpointNetworks[endpointHost(n.Endpoint)]; known && got != network {
+				t.Fatalf("%s: node %s (%s) serves %s", name, n.Name, n.Endpoint, got)
+			}
+		}
+	}
+}
+
 func TestLoadExpandsEnvReferences(t *testing.T) {
 	t.Setenv("TEST_WALLET_DSN", "secret-dsn")
 	cfg, err := Load(writeConfig(t, `

@@ -660,6 +660,9 @@ func (c *Config) validate() error {
 	if tokens == 0 {
 		return fmt.Errorf("wallet.tokens: at least one enabled token is required")
 	}
+	if err := c.validateNodeNetwork(); err != nil {
+		return err
+	}
 	if c.Energy.Mode == "fixed" && c.Energy.Fixed == "" {
 		return fmt.Errorf("energy.fixed is required when energy.mode=fixed")
 	}
@@ -674,6 +677,52 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// endpointNetworks maps the hostnames of the public TRON endpoints to the
+// network they serve. A self hosted node has an arbitrary host and is left
+// unchecked.
+var endpointNetworks = map[string]string{
+	"nile.trongrid.io":       "nile",
+	"nileapi.tronscan.org":   "nile",
+	"api.nileex.io":          "nile",
+	"api.shasta.trongrid.io": "shasta",
+	"api.trongrid.io":        "mainnet",
+	"api.tronstack.io":       "mainnet",
+}
+
+// validateNodeNetwork rejects a config whose nodes serve a different network
+// than the one it declares. Such a mix is invisible at runtime: the scanner
+// polls blocks of one chain while the token allowlist and the cursor namespace
+// belong to another, so every transfer falls outside the allowlist and no
+// deposit is ever recorded.
+func (c *Config) validateNodeNetwork() error {
+	want := strings.ToLower(strings.TrimSpace(c.Network))
+	if want == "" {
+		return fmt.Errorf("network is required (mainnet | nile)")
+	}
+	for _, n := range c.ScannerServer.ChainNodes {
+		if !n.Enabled {
+			continue
+		}
+		host := endpointHost(n.Endpoint)
+		got, known := endpointNetworks[host]
+		if !known || got == want {
+			continue
+		}
+		return fmt.Errorf("network is %q but chain node %q (%s) serves %q", want, n.Name, n.Endpoint, got)
+	}
+	return nil
+}
+
+func endpointHost(endpoint string) string {
+	h := strings.TrimSpace(strings.ToLower(endpoint))
+	h = strings.TrimPrefix(strings.TrimPrefix(h, "https://"), "http://")
+	h = strings.TrimSuffix(strings.SplitN(h, "/", 2)[0], ".")
+	if i := strings.LastIndex(h, ":"); i > 0 {
+		h = h[:i]
+	}
+	return h
 }
 
 // Duration parses a duration string with a fallback, so config typos degrade

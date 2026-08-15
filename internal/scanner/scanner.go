@@ -89,6 +89,32 @@ func New(gw *chain.Gateway) *Scanner {
 	}
 }
 
+// VerifyTokens checks that every allowlisted contract exists on the chain the
+// gateway is talking to. A contract of another network is never emitted by the
+// blocks being scanned, so every Transfer log falls outside the allowlist and
+// no deposit is ever recorded while the scanner keeps polling normally.
+func (s *Scanner) VerifyTokens(ctx context.Context) error {
+	missing := make([]string, 0, len(s.tokens))
+	for contract, tk := range s.tokens {
+		ok, err := s.gw.ContractExists(ctx, contract)
+		if err != nil {
+			// A node error says nothing about the allowlist, so the scanner
+			// must still start: an outage is not a misconfiguration.
+			logrus.Warn("token contract check skipped", ",symbol:", tk.symbol,
+				",contract:", contract, ",err:", err)
+			continue
+		}
+		if !ok {
+			missing = append(missing, tk.symbol+"="+contract)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("token contracts not found on the connected chain (network=%s, nodes=%s): %s",
+			config.Cfg.Network, strings.Join(s.gw.Endpoints(), ","), strings.Join(missing, ","))
+	}
+	return nil
+}
+
 // Run scans forward continuously until ctx is cancelled.
 func (s *Scanner) Run(ctx context.Context) error {
 	// Addresses allocated by the api process are picked up by this poll, the

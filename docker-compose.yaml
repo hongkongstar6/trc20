@@ -59,7 +59,9 @@ services:
     # that are not repeated below (FULLNODE_ENDPOINT, energy provider keys...).
     env_file: &env_file [.env]
     environment: &env
-      CONFIG_PATH: /app/configs/config.yaml
+      # Nile 栈用 Nile 配置：configs/config.yaml 是主网配置（主网节点 + 主网合约），
+      # 用它跑测试网会让 scanner 扫 Nile 区块却拿主网合约做白名单，充值永远扫不到。
+      CONFIG_PATH: ${CONFIG_PATH:-/app/configs/config.nile.yaml}
       MYSQL_DSN: "wallet:${MYSQL_PASSWORD:-wallet}@tcp(mysql:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
       # sign 以 mTLS 监听（configs/config.yaml sign_server.tls.enabled=true），

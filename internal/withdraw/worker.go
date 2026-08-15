@@ -588,10 +588,7 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		return nil // on chain, not irreversible yet
 	}
 	if !final.Succeeded() {
-		reason := final.Receipt.Result
-		if reason == "" {
-			reason = final.ResMessage
-		}
+		reason := final.FailureReason()
 		failCode := chain.ClassifyReceipt(final)
 		// The USDT never left the hot wallet, so the order is reported failed and
 		// the business system refunds; withdrawals are never retried on chain
@@ -601,7 +598,52 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		return w.finish(ctx, row, model.WithdrawStateFailed, "on-chain failure: "+reason,
 			failCode, final.Receipt.EnergyUsageTotal, final.Fee, now)
 	}
+	// A SUCCESS receipt is not proof that the tokens moved: a receipt carrying no
+	// event at all, or a token that returns false instead of reverting, leaves the
+	// balance untouched while the transaction itself succeeds. Reporting that as
+	// paid would credit the user with a transfer that never happened.
+	if !transferred(final, row) {
+		logrus.Error("withdraw receipt succeeded without a matching Transfer event",
+			",order_no:", row.OrderNo, ",txid:", row.TxID, ",to_address:", row.ToAddress,
+			",amount_units:", row.AmountUnits, ",logs:", len(final.Log))
+		return w.finish(ctx, row, model.WithdrawStateFailed,
+			"receipt succeeded but no matching Transfer event was emitted",
+			chain.FailNoTransfer, final.Receipt.EnergyUsageTotal, final.Fee, now)
+	}
 	return w.finish(ctx, row, model.WithdrawStateConfirmed, "", "", final.Receipt.EnergyUsageTotal, final.Fee, now)
+}
+
+// transferred reports whether the receipt contains the TRC20 Transfer this order
+// was supposed to produce: the order's token contract, its own hot wallet as
+// sender, its destination and its exact amount.
+func transferred(info *chain.TxInfo, row model.WithdrawRecord) bool {
+	amount, ok := new(big.Int).SetString(row.AmountUnits, 10)
+	if !ok {
+		return false
+	}
+	for _, lg := range info.Log {
+		if len(lg.Topics) != 3 || !strings.EqualFold(lg.Topics[0], tron.TransferEventTopic) {
+			continue
+		}
+		contract, err := tron.HexToAddress(lg.Address)
+		if err != nil || contract != row.Contract {
+			continue
+		}
+		from, err := tron.HexToAddress(lg.Topics[1])
+		// from_address is written when the order is created, but an order from an
+		// older schema may not have it; the sender is then not checked.
+		if err != nil || (row.FromAddress != "" && from != row.FromAddress) {
+			continue
+		}
+		to, err := tron.HexToAddress(lg.Topics[2])
+		if err != nil || to != row.ToAddress {
+			continue
+		}
+		if value, ok := tron.ParseUint256(lg.Data); ok && value.Cmp(amount) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // finalInfo returns the receipt the settlement decision may be based on, or nil
@@ -666,6 +708,16 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 }
 
 func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, reason, failCode string, energyUsed, fee int64, now time.Time) error {
+	if status != model.WithdrawStateConfirmed {
+		// An operator reading a failed order has to see why it failed, so neither
+		// column is ever left empty.
+		if reason == "" {
+			reason = "settled as " + status + " without a reported reason"
+		}
+		if failCode == "" {
+			failCode = chain.FailUnknown
+		}
+	}
 	row.FailCode = failCode
 	row.Status = status
 	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

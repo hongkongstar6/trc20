@@ -59,7 +59,8 @@ services:
     # that are not repeated below (FULLNODE_ENDPOINT, energy provider keys...).
     env_file: &env_file [.env]
     environment: &env
-      CONFIG_PATH: /app/configs/config.yaml
+      #CONFIG_PATH: /app/configs/config.yaml
+      CONFIG_PATH: /app/configs/config.nile.yaml
       MYSQL_DSN: "wallet:${MYSQL_PASSWORD:-wallet}@tcp(mysql:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
       # sign 以 mTLS 监听（configs/config.yaml sign_server.tls.enabled=true)

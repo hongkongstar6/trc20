@@ -61,6 +61,49 @@ func SignTransaction(tx *Transaction, priv *btcec.PrivateKey) (*Transaction, err
 	return &signed, nil
 }
 
+// SerializeSigned encodes a signed transaction as the protobuf bytes the node
+// accepts on /wallet/broadcasthex. raw_data_hex already is the serialized
+// Transaction.raw message, so only the field framing is added: field 1 carries
+// raw_data, field 2 each signature. This is the only way to rebroadcast a
+// transaction of which nothing but raw_data_hex was stored, because
+// /wallet/broadcasttransaction needs the raw_data JSON object.
+func SerializeSigned(tx *Transaction) (string, error) {
+	if tx == nil || tx.RawDataHex == "" {
+		return "", errors.New("transaction has no raw_data_hex")
+	}
+	if len(tx.Signature) == 0 {
+		return "", errors.New("transaction has no signature")
+	}
+	raw, err := hex.DecodeString(strings.TrimPrefix(tx.RawDataHex, "0x"))
+	if err != nil {
+		return "", fmt.Errorf("raw_data_hex: %w", err)
+	}
+	out := appendProtoBytes(nil, 1, raw)
+	for _, s := range tx.Signature {
+		sig, err := hex.DecodeString(strings.TrimPrefix(s, "0x"))
+		if err != nil {
+			return "", fmt.Errorf("signature: %w", err)
+		}
+		out = appendProtoBytes(out, 2, sig)
+	}
+	return hex.EncodeToString(out), nil
+}
+
+// appendProtoBytes writes one length delimited protobuf field.
+func appendProtoBytes(dst []byte, field int, val []byte) []byte {
+	dst = appendVarint(dst, uint64(field)<<3|2)
+	dst = appendVarint(dst, uint64(len(val)))
+	return append(dst, val...)
+}
+
+func appendVarint(dst []byte, v uint64) []byte {
+	for v >= 0x80 {
+		dst = append(dst, byte(v)|0x80)
+		v >>= 7
+	}
+	return append(dst, byte(v))
+}
+
 // signRecoverable produces the 65-byte signature layout used by TRON:
 // R (32) || S (32) || V (1, recovery id 0/1).
 func signRecoverable(digest []byte, priv *btcec.PrivateKey) ([]byte, error) {

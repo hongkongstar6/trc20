@@ -624,13 +624,40 @@ type BroadcastResult struct {
 	Message    string
 }
 
+// broadcastRequest picks the endpoint that fits what the caller has.
+//
+// /wallet/broadcasttransaction parses the raw_data JSON object and ignores
+// raw_data_hex, so a transaction rebuilt from a stored raw_data_hex alone (the
+// rebroadcast path) is read by the node as an empty transaction and answered
+// with a bare {"result": false}. Those bytes are sent as protobuf on
+// /wallet/broadcasthex instead, which needs nothing but raw_data_hex and the
+// signature.
+func broadcastRequest(tx *tron.Transaction) (path string, payload []byte, err error) {
+	if tx != nil && len(tx.RawData) == 0 {
+		hexTx, err := tron.SerializeSigned(tx)
+		if err != nil {
+			return "", nil, err
+		}
+		payload, err = json.Marshal(map[string]string{"transaction": hexTx})
+		if err != nil {
+			return "", nil, err
+		}
+		return "/wallet/broadcasthex", payload, nil
+	}
+	payload, err = json.Marshal(tx)
+	if err != nil {
+		return "", nil, err
+	}
+	return "/wallet/broadcasttransaction", payload, nil
+}
+
 // Broadcast sends one already signed transaction. The same bytes are retried
 // against the fallback nodes; the transaction is never rebuilt here.
 func (g *Gateway) Broadcast(ctx context.Context, tx *tron.Transaction) (*BroadcastResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, g.broadcastTimeout)
 	defer cancel()
 
-	payload, err := json.Marshal(tx)
+	path, payload, err := broadcastRequest(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +667,7 @@ func (g *Gateway) Broadcast(ctx context.Context, tx *tron.Transaction) (*Broadca
 			lastErr = fmt.Errorf("%s: rate limited for another %s", n.conf.Name, left.Truncate(time.Second))
 			continue
 		}
-		raw, err := n.do(ctx, "/wallet/broadcasttransaction", payload)
+		raw, err := n.do(ctx, path, payload)
 		if err != nil {
 			// Network level failure: we cannot tell whether the node accepted
 			// the transaction, so we try the next node with identical bytes.

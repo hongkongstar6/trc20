@@ -339,8 +339,11 @@ func (s *Server) createAddress(c *gin.Context) {
 	// the scanner also syncs new rows from user_wallet periodically.
 	bloom.NotifyWithRetry(address)
 	c.JSON(http.StatusOK, gin.H{
-		"merchant_id": merchantID, "uid": uid, "account": account,
-		"address": address, "chain": model.ChainTRON, "symbol": mch.Symbol,
+		"merchant_id": merchantID,
+		"uid":         uid,
+		"address":     address,
+		"chain":       model.ChainTRON,
+		"symbol":      mch.Symbol,
 	})
 }
 

@@ -164,7 +164,7 @@ func (n *node) do(ctx context.Context, path string, payload []byte) ([]byte, err
 		reader = bytes.NewReader(payload)
 		method = http.MethodPost
 	}
-	logrus.Debugf("node_name:%s method:%s url:%s", n.conf.Name, method, url)
+	//logrus.Debugf("node_name:%s method:%s url:%s", n.conf.Name, method, url)
 	if n.limiter != nil {
 		if err := n.limiter.wait(ctx); err != nil {
 			return nil, err

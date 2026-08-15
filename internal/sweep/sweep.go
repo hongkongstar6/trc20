@@ -382,7 +382,7 @@ func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet
 	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
 		"status": model.SweepStateBroadcast, "txid": res.TxID, "broadcast_at": now, "updated_at": now,
 	})
-	s.log.Info("sweep broadcast", "address", wallet.Address, "symbol", token.Symbol, "amount", amount.String(),
+	s.log.Info("sweep broadcast address: ", wallet.Address, "symbol: ", token.Symbol, "amount: ", amount.String(),
 		"txid", res.TxID, "fee_mode", energy.FeeMode(order.Provider), "cost_trx", order.CostTRX)
 	return nil
 }

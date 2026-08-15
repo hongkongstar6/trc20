@@ -116,7 +116,7 @@ func (w *Worker) processCreated(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.execute(ctx, &row); err != nil {
-			logrus.Error("withdraw execute failed", "order_no", row.OrderNo, ",err:", err)
+			logrus.Error("withdraw execute failed ", "order_no:", row.OrderNo, ",err:", err)
 		}
 	}
 	return nil
@@ -369,8 +369,7 @@ func (w *Worker) tokenBalance(ctx context.Context, contract, address string) (*b
 // the cause the same order is executed by a later round instead of being
 // failed back to the business system.
 func (w *Worker) halt(ctx context.Context, row *model.WithdrawRecord, failCode, reason string) error {
-	logrus.Error("ALERT withdraw halted", "order_no", row.OrderNo,
-		"fail_code", failCode, "reason", reason)
+	logrus.Error("ALERT withdraw halted ", "order_no", row.OrderNo, "fail_code", failCode, "reason", reason)
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
 		UpdateColumns(map[string]any{

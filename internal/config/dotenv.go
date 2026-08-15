@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // LoadDotEnv reads a .env file and exports the entries that are not already
@@ -58,12 +60,29 @@ func parseDotEnvLine(line string) (key, value string, ok bool) {
 	case len(v) >= 2 && strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'"):
 		v = v[1 : len(v)-1]
 	default:
-		// Unquoted values may carry a trailing comment.
-		if i := strings.Index(v, " #"); i >= 0 {
-			v = strings.TrimSpace(v[:i])
-		}
+		v = stripInlineComment(v)
 	}
 	return k, v, true
+}
+
+// stripInlineComment drops the trailing comment of an unquoted value. The
+// comment marker counts when it opens the value or follows whitespace, so
+// "WALLET_PASSPHRASE= #口令" stays empty instead of becoming the comment itself,
+// while a value such as "pa#ss" keeps its '#'.
+func stripInlineComment(v string) string {
+	for i, r := range v {
+		if r != '#' {
+			continue
+		}
+		if i == 0 {
+			return ""
+		}
+		prev, _ := utf8.DecodeLastRuneInString(v[:i])
+		if unicode.IsSpace(prev) {
+			return strings.TrimSpace(v[:i])
+		}
+	}
+	return v
 }
 
 // FindUp walks from dir towards the filesystem root and returns the first

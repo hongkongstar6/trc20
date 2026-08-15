@@ -15,6 +15,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/config"
 	"github.com/hongkongstar6/trc20/internal/hd"
 	"github.com/hongkongstar6/trc20/internal/tron"
+	"github.com/sirupsen/logrus"
 )
 
 // Purposes classify what a signature may be used for. sign-service enforces
@@ -76,6 +77,7 @@ type AuditSink interface {
 }
 
 func New(cfg config.SignConfig, policy Policy, audit AuditSink) (*Service, error) {
+	warnSeedInputs(cfg)
 	w, err := hd.NewFromMnemonic(cfg.Mnemonic, cfg.Passphrase)
 	if err != nil {
 		return nil, err
@@ -83,7 +85,48 @@ func New(cfg config.SignConfig, policy Policy, audit AuditSink) (*Service, error
 	if policy.AllowedContracts == nil {
 		policy.AllowedContracts = map[string]bool{}
 	}
+	checkSystemAddresses(w)
 	return &Service{wallet: w, policy: policy, audit: audit}, nil
+}
+
+// checkSystemAddresses compares every configured system address with the one the
+// loaded mnemonic derives for its path. A mismatch means the running seed is not
+// the seed the addresses were taken from (wrong mnemonic, stray passphrase), and
+// it is worth shouting about at startup instead of surfacing later as a refused
+// withdrawal.
+func checkSystemAddresses(w *hd.Wallet) {
+	named := map[string]config.NamedAddress{
+		"hot_wallet":   config.Cfg.Wallet.HotWallet,
+		"sweep_wallet": config.Cfg.Wallet.SweepWallet,
+		"gas_account":  config.Cfg.Wallet.GasAccount,
+	}
+	for name, want := range named {
+		if want.Address == "" || want.Path == "" {
+			continue
+		}
+		got, err := w.DeriveAddress(want.Path)
+		if err != nil {
+			logrus.Warn("signer: ", name, " 路径 ", want.Path, " 派生失败,err:", err)
+			continue
+		}
+		if got != want.Address {
+			logrus.Error("signer: ", name, " 配置地址 ", want.Address, " 与助记词在 ", want.Path, " 上派生出的 ", got,
+				" 不一致：请确认 WALLET_MNEMONIC / WALLET_PASSPHRASE 与地址来源钱包一致")
+		}
+	}
+}
+
+// warnSeedInputs reports the two configuration mistakes that silently move every
+// derived address away from what an external wallet shows for the same mnemonic
+// and path: stray whitespace inside the mnemonic and an unintended passphrase.
+// Neither value is logged, only its shape.
+func warnSeedInputs(cfg config.SignConfig) {
+	if hd.NormalizeMnemonic(cfg.Mnemonic) != strings.TrimSpace(cfg.Mnemonic) {
+		logrus.Warn("signer: mnemonic 含非常规空白（重复空格/制表符/全角空格/换行），已按 BIP39 归一化后再派生")
+	}
+	if p := hd.NormalizePassphrase(cfg.Passphrase); p != "" {
+		logrus.Warn("signer: wallet passphrase 非空（", len([]rune(p)), " 个字符），派生地址将与不带 passphrase 导入的钱包不一致")
+	}
 }
 
 func (s *Service) recordAudit(ctx context.Context, req *SignRequest, txid, caller string, allowed bool, reason string) {

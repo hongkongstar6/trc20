@@ -1,6 +1,7 @@
 package hd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hongkongstar6/trc20/internal/tron"
@@ -93,6 +94,57 @@ func TestDeriveAddressMatchesPrivateKey(t *testing.T) {
 	}
 	if addr != fromKey {
 		t.Fatalf("address %s does not match the key derived address %s", addr, fromKey)
+	}
+}
+
+// The BIP39 test vector address every wallet (TronLink included) shows for this
+// mnemonic. It pins the derivation so a seed level regression cannot slip in.
+func TestDeriveAddressMatchesBIP39Vector(t *testing.T) {
+	w, err := NewFromMnemonic(testMnemonic, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.DeriveAddress("m/44'/195'/0'/0/0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH"
+	if got != want {
+		t.Fatalf("derived %s, want %s", got, want)
+	}
+}
+
+// A mnemonic pasted with double spaces, tabs, newlines or ideographic spaces
+// still validates, so without normalization it would derive a different -- and
+// from the wallet owner's point of view wrong -- address.
+func TestIrregularWhitespaceDerivesTheSameAddress(t *testing.T) {
+	want, err := NewFromMnemonic(testMnemonic, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAddr, err := want.DeriveAddress("m/44'/195'/0'/0/0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messy := []string{
+		"  " + testMnemonic + "\n",
+		strings.Replace(testMnemonic, "abandon abandon", "abandon  abandon", 1),
+		strings.Replace(testMnemonic, "abandon about", "abandon\tabout", 1),
+		strings.ReplaceAll(testMnemonic, " ", "\u3000"),
+		strings.ReplaceAll(testMnemonic, " ", "\u00a0"),
+	}
+	for _, m := range messy {
+		w, err := NewFromMnemonic(m, "")
+		if err != nil {
+			t.Fatalf("NewFromMnemonic(%q): %v", m, err)
+		}
+		got, err := w.DeriveAddress("m/44'/195'/0'/0/0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != wantAddr {
+			t.Fatalf("mnemonic %q derived %s, want %s", m, got, wantAddr)
+		}
 	}
 }
 

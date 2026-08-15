@@ -31,6 +31,28 @@ func TestLoadDotEnvParsesAndKeepsExistingEnv(t *testing.T) {
 	}
 }
 
+// A value that is nothing but a comment must stay empty: an accidental
+// "WALLET_PASSPHRASE= #口令" used to become a real passphrase and silently
+// changed every derived address.
+func TestParseDotEnvLineComments(t *testing.T) {
+	cases := map[string]string{
+		"WALLET_PASSPHRASE= #口令":  "",
+		"WALLET_PASSPHRASE=#口令":   "",
+		"WALLET_PASSPHRASE=\t# x": "",
+		"P=pa#ss":                 "pa#ss",
+		"P=value\t# note":         "value",
+	}
+	for line, want := range cases {
+		_, got, ok := parseDotEnvLine(line)
+		if !ok {
+			t.Fatalf("%q was skipped", line)
+		}
+		if got != want {
+			t.Fatalf("%q -> %q, want %q", line, got, want)
+		}
+	}
+}
+
 func TestLoadDotEnvMissingFileIsNoError(t *testing.T) {
 	if err := LoadDotEnv(filepath.Join(t.TempDir(), ".env")); err != nil {
 		t.Fatalf("LoadDotEnv: %v", err)

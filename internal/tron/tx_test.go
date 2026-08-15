@@ -66,6 +66,31 @@ func TestSignTransactionRejectsTxIDMismatch(t *testing.T) {
 	}
 }
 
+// The serialized form is what a rebroadcast sends, so the field framing and the
+// varint length of a realistic (>127 byte) raw_data must be exact.
+func TestSerializeSignedFramesRawDataAndSignature(t *testing.T) {
+	raw := strings.Repeat("aa", 200)
+	sig := strings.Repeat("bb", 65)
+	got, err := SerializeSigned(&Transaction{RawDataHex: raw, Signature: []string{sig}})
+	if err != nil {
+		t.Fatalf("SerializeSigned: %v", err)
+	}
+	// field 1 (0a) length 200 as varint c801, then field 2 (12) length 65 (41).
+	want := "0ac801" + raw + "1241" + sig
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestSerializeSignedRejectsUnsignedTransaction(t *testing.T) {
+	if _, err := SerializeSigned(&Transaction{RawDataHex: "0a02aabb"}); err == nil {
+		t.Fatal("expected an error for a transaction without a signature")
+	}
+	if _, err := SerializeSigned(&Transaction{Signature: []string{"aa"}}); err == nil {
+		t.Fatal("expected an error for a transaction without raw_data_hex")
+	}
+}
+
 func TestSignTransactionProducesRecoverableSignature(t *testing.T) {
 	priv, err := btcec.NewPrivateKey()
 	if err != nil {

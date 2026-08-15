@@ -164,6 +164,57 @@ func TestBroadcastReturnsRejection(t *testing.T) {
 	}
 }
 
+// A rebroadcast only has raw_data_hex, which /wallet/broadcasttransaction
+// ignores, so those bytes must go out as protobuf on /wallet/broadcasthex.
+func TestBroadcastUsesHexEndpointWithoutRawData(t *testing.T) {
+	var path, body string
+	accept := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		_, _ = w.Write([]byte(`{"result":true,"code":"SUCCESS","txid":"aa"}`))
+	})
+	gw, closeAll := twoNodeGateway(t, accept, accept)
+	defer closeAll()
+
+	res, err := gw.Broadcast(context.Background(), &tron.Transaction{
+		TxID: "aa", RawDataHex: "0a02aabb", Signature: []string{"1234"},
+	})
+	if err != nil || !res.Accepted {
+		t.Fatalf("Broadcast: res=%+v err=%v", res, err)
+	}
+	if path != "/wallet/broadcasthex" {
+		t.Fatalf("path = %s, want /wallet/broadcasthex", path)
+	}
+	// 0a 04 <raw_data> 12 02 <signature>
+	if want := `{"transaction":"0a040a02aabb12021234"}`; body != want {
+		t.Fatalf("body = %s, want %s", body, want)
+	}
+}
+
+// With raw_data echoed by the node the JSON endpoint stays in use.
+func TestBroadcastUsesJSONEndpointWithRawData(t *testing.T) {
+	var path string
+	accept := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{"result":true}`))
+	})
+	gw, closeAll := twoNodeGateway(t, accept, accept)
+	defer closeAll()
+
+	if _, err := gw.Broadcast(context.Background(), &tron.Transaction{
+		TxID:       "aa",
+		RawData:    map[string]any{"contract": []any{}},
+		RawDataHex: "0a02aabb",
+		Signature:  []string{"1234"},
+	}); err != nil {
+		t.Fatalf("Broadcast: %v", err)
+	}
+	if path != "/wallet/broadcasttransaction" {
+		t.Fatalf("path = %s, want /wallet/broadcasttransaction", path)
+	}
+}
+
 func TestGetTxInfoByIDReturnsNilWhenNotOnChain(t *testing.T) {
 	empty := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{}`))

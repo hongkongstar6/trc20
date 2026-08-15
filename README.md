@@ -114,6 +114,12 @@ CONFIG_PATH=configs/config.nile.yaml ./bin/api
 找不到再回退到 `configs/config.nile.yaml`，因此在 VS Code 里直接调试 `cmd/*`
 无需额外参数（`.vscode/launch.json` 已提供各服务的调试配置）。
 
+在 Nile 上跑必须显式指定 `configs/config.nile.yaml`：`configs/config.yaml` 是主网配置
+（主网节点 + 主网 USDT 合约），用它连测试网时 scanner 会照常轮询 Nile 区块，但每条
+Transfer 日志的合约都不在白名单里而被丢弃——充值永远扫不到且日志无异常。为此启动时会
+校验 `network` 与已启用节点所属网络是否一致，scanner 还会在开始扫块前确认
+`wallet.tokens` 里的合约在所连链上存在，不一致直接退出。
+
 Nile 配置中的两个属性是有意为之：
 
 - `energy.mode: fixed` 和 `energy.fixed: trx_burn`，并且两个租赁能源提供商

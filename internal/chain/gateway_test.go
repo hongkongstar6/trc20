@@ -280,21 +280,49 @@ func TestTxInfoSucceeded(t *testing.T) {
 		name    string
 		result  string
 		receipt string
+		resMsg  string
 		want    bool
 	}{
-		{"empty receipt is success", "", "", true},
-		{"explicit success", "SUCCESS", "SUCCESS", true},
-		{"out of energy", "", "OUT_OF_ENERGY", false},
-		{"reverted", "", "REVERT", false},
-		{"failed result", "FAILED", "SUCCESS", false},
+		{"empty receipt is success", "", "", "", true},
+		{"explicit success", "SUCCESS", "SUCCESS", "", true},
+		{"out of energy", "", "OUT_OF_ENERGY", "", false},
+		{"reverted", "", "REVERT", "", false},
+		{"failed result", "FAILED", "SUCCESS", "", false},
+		{"lowercase failed result", "failed", "", "", false},
+		{"padded receipt result", "", " revert ", "", false},
+		{"unknown result value", "WHATEVER", "", "", false},
+		{"reason only in resMessage", "", "", "REVERT opcode executed", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var info TxInfo
 			info.Result = c.result
 			info.Receipt.Result = c.receipt
+			info.ResMessage = c.resMsg
 			if got := info.Succeeded(); got != c.want {
 				t.Fatalf("Succeeded() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestTxInfoFailureReasonNeverEmpty(t *testing.T) {
+	withReceipt := TxInfo{Result: "FAILED", ResMessage: "msg"}
+	withReceipt.Receipt.Result = "OUT_OF_ENERGY"
+	cases := []struct {
+		name string
+		info TxInfo
+		want string
+	}{
+		{"receipt result wins", withReceipt, "OUT_OF_ENERGY"},
+		{"falls back to resMessage", TxInfo{Result: "FAILED", ResMessage: "transfer failed"}, "transfer failed"},
+		{"falls back to result", TxInfo{Result: "FAILED"}, "FAILED"},
+		{"never empty", TxInfo{Result: "SUCCESS"}, "unknown reason"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.info.FailureReason(); got != c.want {
+				t.Fatalf("FailureReason() = %q, want %q", got, c.want)
 			}
 		})
 	}

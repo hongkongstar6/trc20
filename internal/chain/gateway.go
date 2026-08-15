@@ -338,13 +338,34 @@ type TxLog struct {
 
 // Succeeded reports whether the contract execution itself succeeded. A failed
 // TRC20 transfer still lands on chain and still emits a receipt, so this check
-// is what prevents fake deposits.
+// is what prevents fake deposits. Both fields are compared case insensitively
+// because the value comes from a node the service does not control, and an
+// unrecognised value counts as a failure rather than as success.
 func (t *TxInfo) Succeeded() bool {
-	if t.Result == "FAILED" {
+	if res := normResult(t.Result); res != "" && res != "SUCCESS" {
 		return false
 	}
-	r := t.Receipt.Result
+	if t.ResMessage != "" {
+		return false
+	}
+	r := normResult(t.Receipt.Result)
 	return r == "" || r == "SUCCESS"
+}
+
+// FailureReason returns the most specific reason a node gave for a failed
+// transaction. fail_reason must never end up empty for a transaction that is
+// settled as failed, so every field the node may carry the reason in is used.
+func (t *TxInfo) FailureReason() string {
+	for _, s := range []string{t.Receipt.Result, t.ResMessage, t.Result} {
+		if s = strings.TrimSpace(s); s != "" && !strings.EqualFold(s, "SUCCESS") {
+			return s
+		}
+	}
+	return "unknown reason"
+}
+
+func normResult(s string) string {
+	return strings.ToUpper(strings.TrimSpace(s))
 }
 
 // GetTxInfoByBlockNum returns every transaction receipt in a block. This is

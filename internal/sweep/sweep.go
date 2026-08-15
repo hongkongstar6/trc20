@@ -512,10 +512,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		}
 		if !info.Succeeded() {
 			failCode := chain.ClassifyReceipt(info)
-			reason := info.Receipt.Result
-			if reason == "" {
-				reason = info.ResMessage
-			}
+			reason := info.FailureReason()
 			store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).Where("id = ?", row.ID).
 				UpdateColumns(map[string]any{
 					"status": model.SweepStateFailed, "fail_reason": truncate(reason, 240),

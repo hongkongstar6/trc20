@@ -19,6 +19,10 @@ const (
 	FailExpired   = "expired"
 	FailNode      = "node_error"
 	FailUnknown   = "unknown"
+
+	// FailNoTransfer marks a transaction whose receipt reports success while the
+	// expected TRC20 Transfer event is missing, so no token actually moved.
+	FailNoTransfer = "no_transfer_event"
 )
 
 // ClassifyReceipt maps an on-chain receipt of a failed transaction onto a

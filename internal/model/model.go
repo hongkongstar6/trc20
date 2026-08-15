@@ -158,7 +158,12 @@ type WithdrawRecord struct {
 	// FailCode is the classified reason (chain.Fail*), which is what retry and
 	// alerting branch on; FailReason keeps the raw node message.
 	FailCode string `gorm:"size:32;index" json:"fail_code"`
-	TxID     string `gorm:"column:txid;size:70;index" json:"txid"` //交易的链hash
+	// HaltCount counts the rounds the order was halted before signing, e.g. the
+	// hot wallet being short of USDT or TRX. Once it reaches
+	// withdraw_server.halt_max_retries the order is failed instead of retried.
+	// 提现因人工原因停下的次数，达到配置上限后订单结单为失败
+	HaltCount int    `gorm:"column:halt_count;default:0" json:"halt_count"`
+	TxID      string `gorm:"column:txid;size:70;index" json:"txid"` //交易的链hash
 	// SignedRaw is the exact signed transaction. A retry always rebroadcasts
 	// these bytes; a second transaction is only built after expiration and
 	// only when the txid is provably absent from the chain.

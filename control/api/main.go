@@ -46,7 +46,7 @@ func main() {
 		mq, err := outbox.NewRocketMQPublisher(config.Cfg.Notify)
 		if err != nil {
 			logrus.Infof("配置: %+v", config.Cfg.Notify)
-			logrus.Error("rocketmq publisher init failed", "err:", err)
+			logrus.Error("rocketmq publisher init failed", ",err:", err)
 			return
 		}
 		defer mq.Close()
@@ -63,7 +63,7 @@ func main() {
 	}()
 
 	r := api.New(signClient).Router()
-	logrus.Info("wallet-api listening", "addr", config.Cfg.APIServer.Listen)
+	logrus.Info("wallet-api listening", ",addr:", config.Cfg.APIServer.Listen)
 	if err := r.Run(config.Cfg.APIServer.Listen); err != nil {
 		logrus.Error("http server stopped", ",err:", err)
 	}

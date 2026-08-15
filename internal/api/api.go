@@ -75,8 +75,8 @@ func (s *Server) requestLogger() gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 		logrus.Info("http",
-			"method", c.Request.Method, "path", c.FullPath(),
-			"status", c.Writer.Status(), "cost_ms", time.Since(start).Milliseconds())
+			",method:", c.Request.Method, ",path:", c.FullPath(),
+			",status:", c.Writer.Status(), ",cost_ms:", time.Since(start).Milliseconds())
 	}
 }
 

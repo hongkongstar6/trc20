@@ -97,7 +97,7 @@ func (a *App) EnergyManager() (*energy.Manager, error) {
 	for n := range provs {
 		names = append(names, n)
 	}
-	logrus.Info("energy providers loaded", "providers", names, "mode", config.Cfg.Energy.Mode)
+	logrus.Info("energy providers loaded", ",providers:", names, ",mode:", config.Cfg.Energy.Mode)
 	return energy.NewManager(config.Cfg.Energy, a.Gateway, provs), nil
 }
 

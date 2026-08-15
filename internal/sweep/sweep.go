@@ -51,8 +51,8 @@ func New(gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pricer *en
 	if len(tokens) == 0 {
 		return nil, errors.New("sweep: no enabled token configured")
 	}
-	if config.Cfg.Wallet.FinanceWallet.Address == "" {
-		return nil, errors.New("sweep: wallet.finance_wallet.address is required")
+	if config.Cfg.Wallet.SweepWallet.Address == "" {
+		return nil, errors.New("sweep: wallet.sweep_wallet.address is required")
 	}
 	return &Service{gw: gw, sign: sign, mgr: mgr, pricer: pricer, tokens: tokens, log: logrus.StandardLogger()}, nil
 }
@@ -213,6 +213,7 @@ func (s *Service) isStale(ctx context.Context, token config.TokenConfig, address
 	return time.Since(oldest.CreatedAt) > time.Duration(days)*24*time.Hour
 }
 
+// 预估交易需要的能量
 func (s *Service) tokenBalance(ctx context.Context, contract, address string) (*big.Int, error) {
 	data, err := tron.EncodeTRC20BalanceOf(address)
 	if err != nil {
@@ -271,7 +272,7 @@ func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet
 		return nil
 	}
 
-	finance := config.Cfg.Wallet.FinanceWallet.Address
+	finance := config.Cfg.Wallet.SweepWallet.Address
 	data, err := tron.EncodeTRC20Transfer(finance, amount) //构建一个智能合约函数
 
 	if err != nil {

@@ -247,7 +247,7 @@ func TestSweepSignsValidRequest(t *testing.T) {
 func TestPolicyFromConfig(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Wallet.HotWallet.Address = outsideAddr
-	cfg.Wallet.FinanceWallet.Address = financeAddr
+	cfg.Wallet.SweepWallet.Address = financeAddr
 	cfg.Wallet.Tokens = []config.TokenConfig{
 		{Symbol: "USDT", Contract: usdtContract, Enabled: true},
 		{Symbol: "OTHER", Contract: outsideAddr, Enabled: false},

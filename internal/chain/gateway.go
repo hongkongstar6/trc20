@@ -35,10 +35,10 @@ type Gateway struct {
 	retryPerNode     int
 	solidityConfirm  bool
 	broadcastTimeout time.Duration
+	rateLimitWait    time.Duration
 	// rateLimitWait bounds how long a call may sit waiting for a throttled
 	// node to reopen. Waiting is correct for the scanner (skipping a block
 	// loses deposits), but it must not block a caller forever.
-	rateLimitWait time.Duration
 }
 type node struct {
 	conf    config.NodeConfig
@@ -216,15 +216,6 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// walletPath returns the confirmed (solidity) path when the caller asked for
-// finalised data and the deployment is configured for it.
-func (g *Gateway) walletPath(p string, solidity bool) string {
-	if solidity && g.solidityConfirm {
-		return "/walletsolidity" + p
-	}
-	return "/wallet" + p
-}
-
 // ---------------------------------------------------------------- block data
 
 type Block struct {
@@ -289,6 +280,15 @@ type BlockDetail struct {
 
 func (b *Block) Number() int64    { return b.BlockHeader.RawData.Number }
 func (b *Block) Timestamp() int64 { return b.BlockHeader.RawData.Timestamp }
+
+// walletPath returns the confirmed (solidity) path when the caller asked for
+// finalised data and the deployment is configured for it.
+func (g *Gateway) walletPath(p string, solidity bool) string {
+	if solidity && g.solidityConfirm {
+		return "/walletsolidity" + p
+	}
+	return "/wallet" + p
+}
 
 func (g *Gateway) GetNowBlock(ctx context.Context) (*Block, error) {
 	var b Block
@@ -447,6 +447,7 @@ func (g *Gateway) TriggerConstantContract(ctx context.Context, owner, contract, 
 		"contract_address": contractHex,
 		"data":             data,
 	}
+	//预估交易要消耗的能量
 	if err := g.call(ctx, g.walletPath("/triggerconstantcontract", false), body, &out); err != nil {
 		return "", 0, err
 	}

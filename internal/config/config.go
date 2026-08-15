@@ -178,10 +178,10 @@ type WalletConfig struct {
 	Tokens      []TokenConfig `yaml:"tokens"`       //
 	// Named system addresses. Their derivation paths are fixed and never
 	// reused by user deposit addresses.
-	HotWallet     NamedAddress `yaml:"hot_wallet"`
-	FinanceWallet NamedAddress `yaml:"finance_wallet"`
-	GasAccount    NamedAddress `yaml:"gas_account"`
-	IndexBatch    int          `yaml:"index_batch"`
+	HotWallet   NamedAddress `yaml:"hot_wallet"`
+	SweepWallet NamedAddress `yaml:"sweep_wallet"`
+	GasAccount  NamedAddress `yaml:"gas_account"`
+	IndexBatch  int          `yaml:"index_batch"`
 }
 
 type NamedAddress struct {

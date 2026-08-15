@@ -12,6 +12,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	bip39 "github.com/tyler-smith/go-bip39"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/hongkongstar6/trc20/internal/tron"
 )
@@ -25,16 +26,32 @@ type Wallet struct {
 	master *hdkeychain.ExtendedKey //seed 派生出的 BIP32 主密钥
 }
 
+// NormalizeMnemonic canonicalises a mnemonic the way BIP39 requires before it
+// is used as PBKDF2 input: NFKD normalization and exactly one ASCII space
+// between words. Word list validation splits on any whitespace, but the seed is
+// derived from the raw string, so a mnemonic pasted with a double space, a tab,
+// a newline or an ideographic space still validates while producing a seed that
+// no standard wallet (TronLink, imToken, Ledger) would compute.
+func NormalizeMnemonic(mnemonic string) string {
+	return strings.Join(strings.Fields(norm.NFKD.String(mnemonic)), " ")
+}
+
+// NormalizePassphrase applies the NFKD normalization BIP39 mandates for the
+// optional passphrase.
+func NormalizePassphrase(passphrase string) string {
+	return norm.NFKD.String(passphrase)
+}
+
 // NewFromMnemonic validates the mnemonic and builds the master key.
 func NewFromMnemonic(mnemonic, passphrase string) (*Wallet, error) {
-	mnemonic = strings.TrimSpace(mnemonic)
+	mnemonic = NormalizeMnemonic(mnemonic)
 	if mnemonic == "" {
 		return nil, errors.New("hd: empty mnemonic")
 	}
 	if !bip39.IsMnemonicValid(mnemonic) {
 		return nil, errors.New("hd: invalid mnemonic checksum")
 	}
-	seed := bip39.NewSeed(mnemonic, passphrase)
+	seed := bip39.NewSeed(mnemonic, NormalizePassphrase(passphrase))
 	master, err := hdkeychain.NewMaster(seed, &chaincfg.MainNetParams)
 	if err != nil {
 		return nil, fmt.Errorf("hd: new master: %w", err)

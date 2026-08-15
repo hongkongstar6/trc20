@@ -360,7 +360,7 @@ type createWithdrawRequest struct {
 	NotifyUrl  string `json:"notify_url" binding:"required"`  //异步通知地址
 	OrderTime  int64  `json:"order_time" binding:"required"`  //下单时间戳秒
 	ClientIp   string `json:"client_ip" binding:"required"`   //用户ip
-	Sign       string `json:"sgin" binding:"required"`        //签名
+	Sign       string `json:"sgin"`                           //签名
 }
 
 type createWithdrawResponse struct {

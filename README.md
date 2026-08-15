@@ -66,6 +66,8 @@ cmd/withdraw/main.go — 提现 worker（withdraw-worker）：加上热钱包能
 
 cp .env.example .env # 填写助记符、HMAC 密钥和地址
 
+bash deploy/tls/gen-certs.sh # 生成 sign 的 mTLS 证书到 etc/tls（ca/sign/client）
+
 docker compose up -d mysql redis
 
 docker compose up --build api scanner withdraw sweep sign
@@ -397,6 +399,26 @@ dial tcp 192.168.65.254:9000: connect: connection refused
 UPDATE notify_outbox SET status = 'pending', retry_count = 0, next_retry = NOW(), last_error = ''
 WHERE status = 'dead';
 ```
+
+### /v1/address 返回 Client sent an HTTP request to an HTTPS server
+
+```
+{"error": "请求签名服,derive failed: signer: http 400:
+Client sent an HTTP request to an HTTPS server."}
+```
+
+`sign_server.tls.enabled: true` 时 sign 以 mTLS 监听，调用方的
+`sign_server.endpoint`（容器里由 `SIGN_ENDPOINT` 注入）必须是 `https://`。
+现在 scheme 与 `tls.enabled` 不一致会被自动纠正并打 warning 日志，同时排查：
+
+1. 证书齐全：`etc/tls` 下要有 `ca.crt` / `sign.crt` `sign.key` /
+   `client.crt` `client.key`，缺失用 `bash deploy/tls/gen-certs.sh` 生成。
+   客户端证书与服务端证书是两套，配置项分别是 `client_cert_file` /
+   `client_key_file` 与 `cert_file` / `key_file`。
+2. `sign.crt` 的 SAN 要包含 `sign_server.tls.server_name`（默认 `sign.internal`）。
+3. 证书是构建进镜像的（Dockerfile `COPY etc/`），换证书后要 `--build` 重建。
+4. 本地调试想关掉 mTLS：把 `sign_server.tls.enabled` 置 false，endpoint 会
+   自动降级成 `http://`。
 
 ## 开发
 

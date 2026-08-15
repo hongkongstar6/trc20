@@ -42,7 +42,8 @@ api_server:
 
 sign_server:
     listen: ":8090"
-    endpoint: "${SIGN_ENDPOINT:-http://127.0.0.1:8090}"
+    # tls.enabled=true 时必须用 https（scheme 与 tls.enabled 不一致会被自动纠正并告警）
+    endpoint: "${SIGN_ENDPOINT:-https://127.0.0.1:8090}"
     token: "${SIGN_TOKEN}"
     # Production: the mnemonic should be injected by the secret manager, or
     # better, replaced by a KMS/HSM/Vault Transit backed signing key.
@@ -50,8 +51,12 @@ sign_server:
     passphrase: "${WALLET_PASSPHRASE:-}" #口令
     tls:
         enabled: true
+        # 服务端证书（sign 进程用）
         cert_file: ./etc/tls/sign.crt
         key_file: ./etc/tls/sign.key
+        # 客户端证书（api/withdraw/sweep 用，mTLS 必需）
+        client_cert_file: ./etc/tls/client.crt
+        client_key_file: ./etc/tls/client.key
         ca_file: ./etc/tls/ca.crt
         server_name: sign.internal
 

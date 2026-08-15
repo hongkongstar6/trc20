@@ -105,11 +105,15 @@ type SignConfig struct {
 	Mnemonic   string `yaml:"mnemonic"`   //助记词
 	Passphrase string `yaml:"passphrase"` //口令
 	TLS        struct {
-		Enabled    bool   `yaml:"enabled"`
-		CertFile   string `yaml:"cert_file"`
-		KeyFile    string `yaml:"key_file"`
-		CAFile     string `yaml:"ca_file"`
-		ServerName string `yaml:"server_name"`
+		Enabled  bool   `yaml:"enabled"`
+		CertFile string `yaml:"cert_file"`
+		KeyFile  string `yaml:"key_file"`
+		// ClientCertFile / ClientKeyFile are the caller side key pair for
+		// mTLS. They fall back to CertFile / KeyFile when unset.
+		ClientCertFile string `yaml:"client_cert_file"`
+		ClientKeyFile  string `yaml:"client_key_file"`
+		CAFile         string `yaml:"ca_file"`
+		ServerName     string `yaml:"server_name"`
 	} `yaml:"tls"`
 }
 

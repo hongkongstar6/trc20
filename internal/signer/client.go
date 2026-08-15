@@ -25,7 +25,7 @@ type Client struct {
 
 func NewClient(cfg config.SignConfig) (*Client, error) {
 	c := &Client{
-		endpoint: strings.TrimRight(cfg.Endpoint, "/"),
+		endpoint: normalizeEndpoint(strings.TrimRight(cfg.Endpoint, "/"), cfg.TLS.Enabled),
 		token:    cfg.Token,
 		http:     &http.Client{Timeout: defaultClientTimeout},
 	}
@@ -42,13 +42,36 @@ func NewClient(cfg config.SignConfig) (*Client, error) {
 	return c, nil
 }
 
+// normalizeEndpoint keeps the URL scheme in sync with sign.tls.enabled. The
+// endpoint is usually injected per environment (SIGN_ENDPOINT) while the TLS
+// switch lives in the config file, so the two drift apart easily; talking http
+// to the TLS listener only surfaces as an opaque "Client sent an HTTP request
+// to an HTTPS server" 400.
+func normalizeEndpoint(endpoint string, tlsEnabled bool) string {
+	switch {
+	case tlsEnabled && strings.HasPrefix(endpoint, "http://"):
+		fixed := "https://" + strings.TrimPrefix(endpoint, "http://")
+		logrus.Warn("signer: sign.tls.enabled=true, endpoint 由 ", endpoint, " 改写为 ", fixed)
+		return fixed
+	case !tlsEnabled && strings.HasPrefix(endpoint, "https://"):
+		fixed := "http://" + strings.TrimPrefix(endpoint, "https://")
+		logrus.Warn("signer: sign.tls.enabled=false, endpoint 由 ", endpoint, " 改写为 ", fixed)
+		return fixed
+	}
+	return endpoint
+}
+
+// buildTLS builds the caller side config. sign-service requires a client
+// certificate, which must be the client key pair and not the server one.
 func buildTLS(cfg config.SignConfig) (*tls.Config, error) {
-	dir, _ := os.Getwd()
-	logrus.Println("当前工作目录:", dir)
+	certFile, keyFile := cfg.TLS.ClientCertFile, cfg.TLS.ClientKeyFile
+	if certFile == "" || keyFile == "" {
+		certFile, keyFile = cfg.TLS.CertFile, cfg.TLS.KeyFile
+	}
 
 	out := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: cfg.TLS.ServerName}
-	if cfg.TLS.CertFile != "" && cfg.TLS.KeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile)
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, fmt.Errorf("signer: load client cert: %w", err)
 		}

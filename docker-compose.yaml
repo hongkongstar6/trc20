@@ -62,7 +62,9 @@ services:
       CONFIG_PATH: /app/configs/config.yaml
       MYSQL_DSN: "wallet:${MYSQL_PASSWORD:-wallet}@tcp(mysql:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local"
       REDIS_ADDR: redis:6379
-      SIGN_ENDPOINT: http://sign:8090
+      # sign 以 mTLS 监听（configs/config.yaml sign_server.tls.enabled=true），
+      # 所以这里必须是 https；证书 SAN 需包含 sign / sign.internal。
+      SIGN_ENDPOINT: https://sign:8090
       SIGN_TOKEN: ${SIGN_TOKEN}
       WALLET_MNEMONIC: ${WALLET_MNEMONIC}
       WALLET_PASSPHRASE: ${WALLET_PASSPHRASE:-}

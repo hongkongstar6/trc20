@@ -214,6 +214,12 @@ type WithdrawConfig struct {
 	DailyMaxUnits    string `yaml:"daily_max_units"`
 	ConfirmBlocks    int64  `yaml:"confirm_blocks"`
 	BroadcastRetries int    `yaml:"broadcast_retries"`
+	// HaltMaxRetries is how many rounds an order may be halted for a cause an
+	// operator has to fix (hot wallet short of USDT or TRX, energy rental down)
+	// before it is failed back to the business system instead of being retried
+	// and alerted on forever. 0 falls back to DefaultHaltMaxRetries.
+	// 提现因热钱包余额/能量等原因停下的最大重试次数，超过后直接结单为提现失败并回调业务方。
+	HaltMaxRetries int `yaml:"halt_max_retries"`
 }
 
 type SweepConfig struct {

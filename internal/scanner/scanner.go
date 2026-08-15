@@ -173,13 +173,13 @@ func (s *Scanner) tick(ctx context.Context) (bool, error) {
 		}
 		//扫描区块数据，提取出转账事件，写入数据库
 		if err := s.scanBlock(ctx, block, fetched[i].infos); err != nil {
-			logrus.Debug("扫描区块:", num, "err:", err)
+			logrus.Debug("扫描区块:", num, ",err:", err)
 			return false, fmt.Errorf("scan block %d: %w", num, err)
 		}
 		cursor.BlockNumber = block.Number()
 		cursor.BlockHash = block.BlockID
 		if err := saveCursor(ctx, cursor); err != nil {
-			logrus.Debug("保存区块:", num, "err:", err)
+			logrus.Debug("保存区块:", num, ",err:", err)
 			return false, err
 		}
 	}
@@ -252,7 +252,7 @@ func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCurso
 				c.BlockHash = legacy.BlockHash
 			} else {
 				logrus.Warn("legacy cursor does not belong to this chain, starting from head",
-					"network", config.Cfg.Network, "legacy_block", legacy.BlockNumber, "head", head)
+					",network:", config.Cfg.Network, ",legacy_block:", legacy.BlockNumber, ",head:", head)
 			}
 		}
 		c.Name, c.BlockNumber = name, start
@@ -274,7 +274,7 @@ func (s *Scanner) loadCursor(ctx context.Context, head int64) (*model.ChainCurso
 	s.cursorChecked = true
 	if !ok {
 		logrus.Error("cursor does not belong to this chain, realigning to head",
-			"network", config.Cfg.Network, "cursor_block", c.BlockNumber, "head", head)
+			",network:", config.Cfg.Network, ",cursor_block:", c.BlockNumber, ",head:", head)
 		c.BlockNumber, c.BlockHash = head-1, ""
 		if err := saveCursor(ctx, &c); err != nil {
 			return nil, err
@@ -484,7 +484,7 @@ func (s *Scanner) confirmUpTo(ctx context.Context, head int64) error {
 	for i := range pending {
 		rec := pending[i]
 		if err := s.confirmOne(ctx, rec, head); err != nil {
-			logrus.Error("confirm deposit failed", "txid", rec.TxID, "event_index", rec.EventIndex, ",err:", err)
+			logrus.Error("confirm deposit failed", ",txid:", rec.TxID, ",event_index:", rec.EventIndex, ",err:", err)
 		}
 	}
 	return nil
@@ -504,7 +504,7 @@ func (s *Scanner) confirmOne(ctx context.Context, rec model.DepositRecord, head 
 			UpdateColumns(map[string]any{"status": model.DepositStateOrphaned, "updated_at": now}).Error
 	}
 	if info.BlockNumber != rec.BlockNumber {
-		logrus.Warn("deposit moved to another block", "txid", rec.TxID, "old", rec.BlockNumber, "new", info.BlockNumber)
+		logrus.Warn("deposit moved to another block", ",txid:", rec.TxID, ",old:", rec.BlockNumber, ",new:", info.BlockNumber)
 		rec.BlockNumber = info.BlockNumber
 	}
 

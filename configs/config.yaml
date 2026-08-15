@@ -136,6 +136,9 @@ withdraw_server:
     max_amount_units: "50000000000" # 50,000 USDT per order
     daily_max_units: "500000000000" # 500,000 USDT per day
     confirm_blocks: 19
+    # 提现因热钱包 USDT/TRX 不足、能量租不到等需人工处理的原因停下时，最多重试多少轮；
+    # 达到该次数后订单直接结单为提现失败，并把失败原因回调给业务系统（不再一直告警重试）。
+    halt_max_retries: 10
     # 提现黑名单在数据库表 address_blacklist 中维护
 
 sweep_server:

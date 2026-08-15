@@ -33,7 +33,7 @@ func main() {
 	}
 	r := gin.New()
 	signer.InitRouter(r, svc, config.Cfg.SignServer.Token)
-	logrus.Info("sign-service listening", "addr", config.Cfg.SignServer.Listen, "mtls", config.Cfg.SignServer.TLS.Enabled)
+	logrus.Info("sign-service listening", ",addr:", config.Cfg.SignServer.Listen, ",mtls:", config.Cfg.SignServer.TLS.Enabled)
 
 	if !config.Cfg.SignServer.TLS.Enabled {
 		if err := r.Run(config.Cfg.SignServer.Listen); err != nil {

@@ -39,9 +39,17 @@ const (
 	FailCodeInsufficientTRX = "hot_wallet_trx_insufficient"
 )
 
+// DefaultHaltMaxRetries is used when withdraw_server.halt_max_retries is unset:
+// an order halted this many times is failed instead of retried forever.
+const DefaultHaltMaxRetries = 10
+
 // ErrHalted stops the current round for an order without failing it: the order
 // stays created and is picked up again once the alert was acted on.
 var ErrHalted = errors.New("withdraw: halted, manual handling required")
+
+// ErrHaltedFailed is returned once a halted order exhausted its retries and was
+// failed back to the business system.
+var ErrHaltedFailed = errors.New("withdraw: halted too many times, order failed")
 
 type Worker struct {
 	//cfg  *config.Config
@@ -115,8 +123,11 @@ func (w *Worker) processCreated(ctx context.Context) error {
 	}
 	for i := range rows {
 		row := rows[i]
-		if err := w.execute(ctx, &row); err != nil {
-			logrus.Error("withdraw execute failed ", "order_no:", row.OrderNo, ",err:", err)
+		err := w.execute(ctx, &row)
+		// A halt already logged its own line with the attempt count, so it is
+		// not repeated here every round.
+		if err != nil && !errors.Is(err, ErrHalted) && !errors.Is(err, ErrHaltedFailed) {
+			logrus.Error("withdraw execute failed ", ",order_no:", row.OrderNo, ",err:", err)
 		}
 	}
 	return nil
@@ -268,7 +279,7 @@ func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid 
 	if w.pool != nil {
 		w.pool.RecordUsage(1)
 	}
-	logrus.Info("withdraw broadcast", "id", id, "txid", txid, "duplicated", result.Duplicated)
+	logrus.Info("withdraw broadcast", ",id:", id, ",txid:", txid, ",duplicated:", result.Duplicated)
 	return nil
 }
 
@@ -296,8 +307,8 @@ func (w *Worker) checkBurnBudget(ctx context.Context, row *model.WithdrawRecord,
 		return fmt.Errorf("withdraw: hot wallet TRX balance query failed: %w", err)
 	}
 	if balance >= costSun {
-		logrus.Info("withdraw pays its fee by burning TRX", "order_no", row.OrderNo,
-			"energy_need", need, "cost_sun", costSun, "trx_balance_sun", balance)
+		logrus.Info("withdraw pays its fee by burning TRX", ",order_no:", row.OrderNo,
+			",energy_need:", need, ",cost_sun:", costSun, ",trx_balance_sun:", balance)
 		return nil
 	}
 	return w.halt(ctx, row, FailCodeInsufficientTRX, fmt.Sprintf(
@@ -368,18 +379,75 @@ func (w *Worker) tokenBalance(ctx context.Context, contract, address string) (*b
 // created state on purpose: the funds are intact, so once the operator fixed
 // the cause the same order is executed by a later round instead of being
 // failed back to the business system.
+//
+// A cause nobody fixes must not halt the same order forever: every halt is
+// counted on the order and once it reaches withdraw_server.halt_max_retries the
+// order is failed with the same reason, which both stops the repeated alert and
+// lets the business system refund the user.
+// 每次停下都会累加次数，达到配置的上限后该订单结单为提现失败并把原因回调给业务系统。
 func (w *Worker) halt(ctx context.Context, row *model.WithdrawRecord, failCode, reason string) error {
-	logrus.Error("ALERT withdraw halted ", "order_no", row.OrderNo, "fail_code", failCode, "reason", reason)
+	attempt := row.HaltCount + 1
+	limit := w.haltMaxRetries()
+	if attempt >= limit {
+		logrus.Error("ALERT withdraw halted, retry limit reached, failing the order ",
+			",order_no:", row.OrderNo, ",fail_code:", failCode, ",attempt:", attempt,
+			",halt_max_retries:", limit, ",reason:", reason)
+		if err := w.failHalted(ctx, row, failCode, reason, attempt); err != nil {
+			logrus.Error("withdraw halt settlement failed", ",order_no:", row.OrderNo, ",err:", err)
+			return err
+		}
+		return fmt.Errorf("%w: %s", ErrHaltedFailed, reason)
+	}
+	logrus.Warn("withdraw halted ", ",order_no:", row.OrderNo, ",fail_code:", failCode,
+		",attempt:", attempt, ",halt_max_retries:", limit, ",reason:", reason)
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
 		UpdateColumns(map[string]any{
 			"fail_reason": truncate(reason, 240),
 			"fail_code":   failCode,
+			"halt_count":  attempt,
 			"updated_at":  time.Now(),
 		}).Error; err != nil {
-		logrus.Error("withdraw halt bookkeeping failed", "order_no", row.OrderNo, ",err:", err)
+		logrus.Error("withdraw halt bookkeeping failed", ",order_no:", row.OrderNo, ",err:", err)
 	}
-	return fmt.Errorf("%w: %s", ErrHalted, reason)
+	row.HaltCount = attempt
+	return fmt.Errorf("%w: %s (attempt %d/%d)", ErrHalted, reason, attempt, limit)
+}
+
+// failHalted settles an order that was halted halt_max_retries times: nothing
+// was ever signed, so no transfer can be in flight and the order can be failed
+// straight from created, with the halt reason reported to the business system.
+func (w *Worker) failHalted(ctx context.Context, row *model.WithdrawRecord, failCode, reason string, attempt int) error {
+	now := time.Now()
+	failReason := fmt.Sprintf("%s (halted %d times, giving up)", reason, attempt)
+	return store.MyStore.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.WithdrawRecord{}).
+			Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
+			UpdateColumns(map[string]any{
+				"status":      model.WithdrawStateFailed,
+				"fail_reason": truncate(failReason, 240),
+				"fail_code":   failCode,
+				"halt_count":  attempt,
+				"updated_at":  now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil // another worker moved it on
+		}
+		row.HaltCount, row.FailCode, row.Status = attempt, failCode, model.WithdrawStateFailed
+		return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result",
+			row.ExtParam, row.MerchantID, row.NotifyURL, w.event(row, "failed", failReason, now))
+	})
+}
+
+// haltMaxRetries is how many halted rounds an order gets before it is failed.
+func (w *Worker) haltMaxRetries() int {
+	if config.Cfg.WithdrawServer.HaltMaxRetries > 0 {
+		return config.Cfg.WithdrawServer.HaltMaxRetries
+	}
+	return DefaultHaltMaxRetries
 }
 
 // riskCheck applies the wallet-side safety limits. Business risk control lives
@@ -449,7 +517,7 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 			if res.Error != nil || res.RowsAffected == 0 {
 				return res.Error
 			}
-			logrus.Warn("withdraw rejected", "order_no", row.OrderNo, "reason", reason)
+			logrus.Warn("withdraw rejected", ",order_no:", row.OrderNo, ",reason:", reason)
 			return store.EnqueueOutbox(tx, "withdraw:"+row.OrderNo, "withdraw_result",
 				row.ExtParam, row.MerchantID, row.NotifyURL, w.event(row, "rejected", reason, now))
 		},
@@ -479,7 +547,7 @@ func (w *Worker) Reconcile(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := w.reconcileOne(ctx, row, head); err != nil {
-			logrus.Error("reconcile withdraw failed", "order_no", row.OrderNo, ",err:", err)
+			logrus.Error("reconcile withdraw failed", ",order_no:", row.OrderNo, ",err:", err)
 		}
 	}
 	return nil
@@ -528,8 +596,8 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		// The USDT never left the hot wallet, so the order is reported failed and
 		// the business system refunds; withdrawals are never retried on chain
 		// because a second transfer could double pay one business order.
-		logrus.Error("withdraw failed on chain", "order_no", row.OrderNo,
-			"txid", row.TxID, "fail_code", failCode, "reason", reason)
+		logrus.Error("withdraw failed on chain", ",order_no:", row.OrderNo,
+			",txid:", row.TxID, ",fail_code:", failCode, ",reason:", reason)
 		return w.finish(ctx, row, model.WithdrawStateFailed, "on-chain failure: "+reason,
 			failCode, final.Receipt.EnergyUsageTotal, final.Fee, now)
 	}

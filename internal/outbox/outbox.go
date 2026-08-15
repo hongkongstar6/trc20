@@ -101,7 +101,7 @@ func (d *Dispatcher) deliver(ctx context.Context, row *model.NotifyOutbox) {
 		// Dead lettered events stay in the table and are exposed through the
 		// reconciliation API, so nothing is ever silently dropped.
 		status = model.OutboxStateDead
-		logrus.Error("outbox event dead lettered", "event_id", row.EventID, ",err:", lastErr)
+		logrus.Error("outbox event dead lettered", ",event_id:", row.EventID, ",err:", lastErr)
 	}
 	store.MyStore.DB.WithContext(ctx).Model(&model.NotifyOutbox{}).Where("id = ?", row.ID).
 		UpdateColumns(map[string]any{
@@ -213,7 +213,7 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 	}
 	mch, err := merchant.Get(ctx, event.MerchantID)
 	if errors.Is(err, merchant.ErrNotFound) {
-		logrus.Warn("merchant callback skipped, merchant unknown", "merchant_id", event.MerchantID)
+		logrus.Warn("merchant callback skipped, merchant unknown", ",merchant_id:", event.MerchantID)
 		return nil
 	}
 	if err != nil {
@@ -221,7 +221,7 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 	}
 	url := callbackURL(event, mch)
 	if mch.Status != model.MerchantStatusOn || url == "" {
-		logrus.Warn("merchant callback skipped", "merchant_id", event.MerchantID, "status", mch.Status)
+		logrus.Warn("merchant callback skipped", ",merchant_id:", event.MerchantID, ",status:", mch.Status)
 		return nil
 	}
 	payload, err := merchant.DecodeParams([]byte(event.Payload))
@@ -252,7 +252,7 @@ func (p *MerchantPublisher) Publish(ctx context.Context, event *model.NotifyOutb
 		logrus.Error("发送失败2,err:", err)
 		return fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(raw), 120))
 	}
-	logrus.Debug("订单发送成功:", event.Account, "内容:", event.Payload)
+	logrus.Debug("订单发送成功", ",account:", event.Account, ",payload:", event.Payload)
 	return nil
 }
 

@@ -30,7 +30,7 @@ func main() {
 	}
 	mgr, err := app.EnergyManager()
 	if err != nil {
-		logrus.Error("energy manager init failed,", "err:", err)
+		logrus.Error("energy manager init failed,", ",err:", err)
 		return
 	}
 	pool := energy.NewPool(config.Cfg.Energy, mgr, app.Gateway, nil, config.Cfg.Wallet.HotWallet.Address)

@@ -280,7 +280,7 @@ func (m *Manager) wait(ctx context.Context, provider Provider, row *model.Energy
 	for time.Now().Before(deadline) {
 		order, err := provider.Poll(ctx, pollKey)
 		if err != nil {
-			logrus.Warn("poll energy order failed", "provider", provider.Name(), "order", pollKey, ",err:", err)
+			logrus.Warn("poll energy order failed", ",provider:", provider.Name(), ",order:", pollKey, ",err:", err)
 		} else {
 			last = order
 			switch order.State {
@@ -325,7 +325,7 @@ func (m *Manager) confirmOnChain(ctx context.Context, addr string, baseline, nee
 func (m *Manager) availableEnergy(ctx context.Context, addr string) int64 {
 	res, err := m.gw.GetAccountResource(ctx, addr)
 	if err != nil {
-		logrus.Warn("energy baseline read failed, assuming zero", "address", addr, ",err:", err)
+		logrus.Warn("energy baseline read failed, assuming zero", ",address:", addr, ",err:", err)
 		return 0
 	}
 	available := res.AvailableEnergy()
@@ -354,7 +354,7 @@ func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder,
 	}
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
 		Where("id = ?", row.ID).UpdateColumns(updates).Error; err != nil {
-		logrus.Error("update energy order failed", "id", row.ID, ",err:", err)
+		logrus.Error("update energy order failed", ",id:", row.ID, ",err:", err)
 	}
 	row.Status = model.EnergyOrderDelegated
 }
@@ -480,7 +480,7 @@ func (m *Manager) ReconcilePending(ctx context.Context) error {
 	for i := range rows {
 		row := rows[i]
 		if err := m.reconcileOne(ctx, &row, timeout); err != nil {
-			logrus.Error("energy order reconcile failed", "request_id", row.RequestID, ",err:", err)
+			logrus.Error("energy order reconcile failed", ",request_id:", row.RequestID, ",err:", err)
 		}
 	}
 	return nil
@@ -514,7 +514,7 @@ func (m *Manager) reconcileOne(ctx context.Context, row *model.EnergyRentOrder, 
 		// may already have expired, which is what the cost report shows.
 		m.markDelegated(ctx, row, order)
 		logrus.Warn("energy order was delegated after the wait timed out",
-			"request_id", row.RequestID, "provider", row.Provider, "cost_trx", row.CostTRX)
+			",request_id:", row.RequestID, ",provider:", row.Provider, ",cost_trx:", row.CostTRX)
 		return nil
 	case StateFailed, StateCancelled:
 		return store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
@@ -532,13 +532,13 @@ func (m *Manager) reconcileOne(ctx context.Context, row *model.EnergyRentOrder, 
 // needs a human to reconcile it against the provider statement.
 func (m *Manager) abandon(ctx context.Context, row *model.EnergyRentOrder, reason string, expired bool) error {
 	if !expired {
-		logrus.Warn("energy order still unresolved", "request_id", row.RequestID,
-			"provider", row.Provider, "reason", reason)
+		logrus.Warn("energy order still unresolved", ",request_id:", row.RequestID,
+			",provider:", row.Provider, ",reason:", reason)
 		return nil
 	}
 	logrus.Error("energy order abandoned, verify it against the provider statement",
-		"request_id", row.RequestID, "provider", row.Provider,
-		"provider_order_id", row.ProviderOrderID, "cost_trx", row.CostTRX, "reason", reason)
+		",request_id:", row.RequestID, ",provider:", row.Provider,
+		",provider_order_id:", row.ProviderOrderID, ",cost_trx:", row.CostTRX, ",reason:", reason)
 	return store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
 		Where("id = ? AND status = ?", row.ID, model.EnergyOrderCreated).
 		UpdateColumns(map[string]any{

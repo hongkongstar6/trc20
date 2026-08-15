@@ -40,6 +40,8 @@ type App struct {
 func Init(service string) (*App, error) {
 	path := flag.String("config", envOr("CONFIG_PATH", defaultConfigPath()), "path to the config file")
 
+	//path := flag.String("config", "configs/config.nile.yaml", "path to the config file")
+
 	migrate := flag.Bool("migrate", true, "run schema auto migration and exit")
 	flag.Parse()
 

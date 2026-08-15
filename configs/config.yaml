@@ -63,23 +63,23 @@ sign_server:
 scanner_server: #扫块配置节点
     # FullNode first once it is ready; TronGrid stays as the failover.
     chain_nodes:
-        - name: fullnode #主网节点：network: mainnet 时这里必须是主网节点，
-          type: trongrid # 否则扫的是别的链，wallet.tokens 的主网合约永远匹配不到（进程启动时会直接报错退出）
-          endpoint: "${FULLNODE_ENDPOINT:-https://api.trongrid.io}" #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
-          priority: 1
-          enabled: true
-          timeout: 10s
-          qps: 10 # 免费 key 限速 15 次/秒，超过后整个 key 会被暂停几十秒
-          burst: 5
-        # - name: trongrid
-        #   type: trongrid
-        #   endpoint: https://api.trongrid.io #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
-        #   api_key: "${TRONGRID_API_KEY}"
-        #   priority: 2
+        # - name: testnode #测试节点
+        #   type: testnode
+        #   endpoint: "https://nile.trongrid.io" #"${FULLNODE_ENDPOINT}" #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
+        #   priority: 1
         #   enabled: true
         #   timeout: 10s
         #   qps: 10 # 免费 key 限速 15 次/秒，超过后整个 key 会被暂停几十秒
         #   burst: 5
+        - name: trongrid
+          type: trongrid
+          endpoint: https://api.trongrid.io #是波场（TRON）官方生态中最核心的 主网（Mainnet）区块链节点与数据服务接口
+          api_key: "${TRONGRID_API_KEY}"
+          priority: 2
+          enabled: true
+          timeout: 10s
+          qps: 10 # 免费 key 限速 15 次/秒，超过后整个 key 会被暂停几十秒
+          burst: 5
     solidity_for_confirm: true
     retry_per_node: 2
     broadcast_timeout: 15s

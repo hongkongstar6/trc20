@@ -83,7 +83,7 @@ wallet:
     account_path: "m/44'/195'/0'/0" #TRON的币种编号是195,第一个0:主账户第几个,第二个0:收款,第三个0:第几个子账户，m/44'/60'/0'/0/0
     tokens:
         - symbol: USDT
-          contract: "${USDT_CONTRACT:-TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf}" #Nile USDT-TRC20 代币合约地址
+          contract: TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf #Nile USDT-TRC20 代币合约地址
           decimals: 6
           enabled: true
         # Nile 没有官方 USDC 合约：自己部署一个 TRC20 测试币后，用 USDC_CONTRACT 指定并打开 enabled

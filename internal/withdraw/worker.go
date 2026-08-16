@@ -61,7 +61,7 @@ type Worker struct {
 	//log   *logrus.Logger
 	// tokens are every enabled token, keyed by upper case symbol: an order pays
 	// out the contract of its own symbol, never the first configured one.
-	tokens map[string]config.TokenConfig
+	tokensCf map[string]config.TokenConfig //k是货币USDT,USDC,v是配置
 }
 
 func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pool *energy.Pool, log *logrus.Logger) (*Worker, error) {
@@ -75,15 +75,19 @@ func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Ma
 	if config.Cfg.Wallet.HotWallet.Address == "" || config.Cfg.Wallet.HotWallet.Path == "" {
 		return nil, errors.New("withdraw: wallet.hot_wallet address and path are required")
 	}
-	return &Worker{gw: gw, sign: sign, mgr: mgr, pool: pool, //log: log,
-		tokens: tokens}, nil
+	return &Worker{
+		gw:       gw,
+		sign:     sign,
+		mgr:      mgr,
+		pool:     pool, //log: log,
+		tokensCf: tokens}, nil
 }
 
 // token resolves the token of an order. A symbol that is no longer configured
 // has no contract to transfer, so the order must be rejected instead of being
 // paid out with whatever token happens to be first in the config.
 func (w *Worker) token(symbol string) (config.TokenConfig, bool) {
-	t, ok := w.tokens[strings.ToUpper(symbol)]
+	t, ok := w.tokensCf[strings.ToUpper(symbol)]
 	return t, ok
 }
 
@@ -97,7 +101,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	interval := config.Duration(config.Cfg.WithdrawServer.PollInterval, 3*time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
 	for {
+		//执行频率,3秒一次
 		if err := w.processCreated(ctx); err != nil {
 			logrus.Error("withdraw process failed", ",err:", err)
 		}
@@ -132,7 +138,7 @@ func (w *Worker) preflight(ctx context.Context) {
 		logrus.Warn("withdraw preflight: 热钱包与归集钱包是同一个地址，提现从归集地址付款",
 			",address:", hot.Address, ",path:", hot.Path)
 	}
-	for _, token := range w.tokens {
+	for _, token := range w.tokensCf {
 		balance, err := w.tokenBalance(ctx, token.Contract, hot.Address)
 		if err != nil {
 			logrus.Warn("withdraw preflight: 热钱包余额查询失败", ",symbol:", token.Symbol, ",err:", err)
@@ -661,6 +667,7 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		// because a second transfer could double pay one business order.
 		logrus.Error("withdraw failed on chain", ",order_no:", row.OrderNo,
 			",txid:", row.TxID, ",fail_code:", failCode, ",reason:", reason)
+
 		return w.finish(ctx, row, model.WithdrawStateFailed, "on-chain failure: "+reason,
 			failCode, final.Receipt.EnergyUsageTotal, final.Fee, now)
 	}
@@ -672,6 +679,7 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 		logrus.Error("withdraw receipt succeeded without a matching Transfer event",
 			",order_no:", row.OrderNo, ",txid:", row.TxID, ",to_address:", row.ToAddress,
 			",amount_units:", row.AmountUnits, ",logs:", len(final.Log))
+
 		return w.finish(ctx, row, model.WithdrawStateFailed,
 			"receipt succeeded but no matching Transfer event was emitted",
 			chain.FailNoTransfer, final.Receipt.EnergyUsageTotal, final.Fee, now)

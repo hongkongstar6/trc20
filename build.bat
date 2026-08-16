@@ -17,23 +17,23 @@ if not exist bin (
 
 echo.
 echo Building api...
-go build -trimpath -ldflags="-s -w" -o bin/api ./control/api
+go build -trimpath -ldflags="-s -w" -o bin/api ./cmd/api
 if errorlevel 1 goto :error
 
 echo Building scanner...
-go build -trimpath -ldflags="-s -w" -o bin/scanner ./control/scanner
+go build -trimpath -ldflags="-s -w" -o bin/scanner ./cmd/scanner
 if errorlevel 1 goto :error
 
 echo Building sign...
-go build -trimpath -ldflags="-s -w" -o bin/sign ./control/sign
+go build -trimpath -ldflags="-s -w" -o bin/sign ./cmd/sign
 if errorlevel 1 goto :error
 
 echo Building sweep...
-go build -trimpath -ldflags="-s -w" -o bin/sweep ./control/sweep
+go build -trimpath -ldflags="-s -w" -o bin/sweep ./cmd/sweep
 if errorlevel 1 goto :error
 
 echo Building withdraw...
-go build -trimpath -ldflags="-s -w" -o bin/withdraw ./control/withdraw
+go build -trimpath -ldflags="-s -w" -o bin/withdraw ./cmd/withdraw
 if errorlevel 1 goto :error
 
 echo.

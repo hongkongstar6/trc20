@@ -1,0 +1,105 @@
+# Local / Nile stack. Secrets come from .env (see .env.example); nothing
+# sensitive is committed.
+#
+# sign-service is deliberately on its own network with no port published to the
+# host: only the workers may reach it.
+services:
+  mysql:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpw}
+      MYSQL_DATABASE: wallet
+      MYSQL_USER: wallet
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wallet}
+    ports: ["3306:3306"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./deploy/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 5s
+      retries: 20
+    networks: [wallet]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: [redis-data:/data]
+    networks: [wallet]
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.0
+    command: sh mqnamesrv
+    ports: ["9876:9876"]
+    networks: [wallet]
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.0
+    command: sh mqbroker -n rocketmq-namesrv:9876 --enable-proxy
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+    depends_on: [rocketmq-namesrv]
+    ports: ["10911:10911", "8081:8081"]
+    networks: [wallet]
+
+  sign:
+    build: .
+    entrypoint: ["/app/sign"]
+    environment: &env
+      CONFIG_PATH: /app/configs/config.nile.yaml
+      MYSQL_DSN: "wallet:${MYSQL_PASSWORD:-wallet}@tcp(mysql:3306)/wallet?charset=utf8mb4&parseTime=True&loc=Local"
+      REDIS_ADDR: redis:6379
+      SIGN_ENDPOINT: http://sign:8090
+      SIGN_TOKEN: ${SIGN_TOKEN}
+      WALLET_MNEMONIC: ${WALLET_MNEMONIC}
+      WALLET_PASSPHRASE: ${WALLET_PASSPHRASE:-}
+      API_HMAC_SECRET: ${API_HMAC_SECRET}
+      NOTIFY_URL: ${NOTIFY_URL}
+      NOTIFY_SECRET: ${NOTIFY_SECRET}
+      HOT_WALLET_ADDRESS: ${HOT_WALLET_ADDRESS}
+      SWEEP_WALLET_ADDRESS: ${SWEEP_WALLET_ADDRESS}
+      GAS_ACCOUNT_ADDRESS: ${GAS_ACCOUNT_ADDRESS}
+      TRONGRID_API_KEY: ${TRONGRID_API_KEY:-}
+      ROCKETMQ_NAMESRV: rocketmq-namesrv:9876
+    depends_on:
+      mysql: {condition: service_healthy}
+    networks: [wallet]
+
+  api:
+    build: .
+    entrypoint: ["/bin/sh", "-c", "/app/api -migrate && exec /app/api"]
+    environment: *env
+    ports: ["8080:8080"]
+    depends_on:
+      mysql: {condition: service_healthy}
+    networks: [wallet]
+
+  scanner:
+    build: .
+    entrypoint: ["/app/scanner"]
+    environment: *env
+    depends_on: [api]
+    networks: [wallet]
+
+  withdraw:
+    build: .
+    entrypoint: ["/app/withdraw"]
+    environment: *env
+    depends_on: [api, sign]
+    networks: [wallet]
+
+  sweep:
+    build: .
+    entrypoint: ["/app/sweep"]
+    environment: *env
+    depends_on: [api, sign]
+    networks: [wallet]
+
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  wallet:

@@ -20,6 +20,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/signer"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/hongkongstar6/trc20/internal/transfer"
 	"github.com/hongkongstar6/trc20/internal/tron"
 	"github.com/sirupsen/logrus"
 )
@@ -58,6 +59,9 @@ type Worker struct {
 	sign *signer.Client
 	mgr  *energy.Manager
 	pool *energy.Pool
+	// exec runs the transfer itself, which is the part a withdrawal shares with
+	// a sweep: estimate, energy, build, sign, broadcast.
+	exec *transfer.Executor
 	//log   *logrus.Logger
 	// tokens are every enabled token, keyed by upper case symbol: an order pays
 	// out the contract of its own symbol, never the first configured one.
@@ -76,7 +80,7 @@ func New(st *store.Store, gw *chain.Gateway, sign *signer.Client, mgr *energy.Ma
 		return nil, errors.New("withdraw: wallet.hot_wallet address and path are required")
 	}
 	return &Worker{gw: gw, sign: sign, mgr: mgr, pool: pool, //log: log,
-		tokens: tokens}, nil
+		exec: transfer.NewExecutor(gw, sign, mgr), tokens: tokens}, nil
 }
 
 // token resolves the token of an order. A symbol that is no longer configured
@@ -133,7 +137,7 @@ func (w *Worker) preflight(ctx context.Context) {
 			",address:", hot.Address, ",path:", hot.Path)
 	}
 	for _, token := range w.tokens {
-		balance, err := w.tokenBalance(ctx, token.Contract, hot.Address)
+		balance, err := w.exec.TokenBalance(ctx, token.Contract, hot.Address)
 		if err != nil {
 			logrus.Warn("withdraw preflight: 热钱包余额查询失败", ",symbol:", token.Symbol, ",err:", err)
 			continue
@@ -212,95 +216,108 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		return err
 	}
 
-	// The recipient's token state decides the energy tier: an address that
-	// never held USDT needs roughly twice the energy, and underestimating
-	// fails the transaction with OUT_OF_ENERGY while still paying the fee.
-	need, err := w.mgr.EstimateEnergy(ctx, hot.Address, token.Contract, data)
-	if err != nil {
-		logrus.Warn("withdraw energy estimate failed, using worst case", ",err:", err)
-		need = config.Cfg.Energy.EnergyPerTxNew
+	_, err = w.exec.Send(ctx, transfer.Request{
+		Purpose:    signer.PurposeWithdraw,
+		From:       hot.Address,
+		DerivePath: hot.Path,
+		To:         row.ToAddress,
+		Contract:   token.Contract,
+		Amount:     amount,
+		Data:       data,
+		// The recipient's token state decides the energy tier: an address that
+		// never held USDT needs roughly twice the energy, and underestimating
+		// fails the transaction with OUT_OF_ENERGY while still paying the fee.
+		FallbackEnergy: config.Cfg.Energy.EnergyPerTxNew,
+		FeeLimitSun:    config.Cfg.WithdrawServer.FeeLimitSun,
+		ExpirationSec:  w.expirationSeconds(),
+	}, transfer.Hooks{
+		Energy: func(ctx context.Context, need int64) error { return w.prepareEnergy(ctx, row, hot.Address, need) },
+		Fail: func(ctx context.Context, failCode string, cause error) error {
+			return w.logFailed(row, failCode, cause)
+		},
+		Signed:    func(ctx context.Context, signed *transfer.Signed) error { return w.persistSigned(ctx, row, signed) },
+		Broadcast: func(ctx context.Context, out *transfer.Broadcast) error { return w.persistBroadcast(ctx, row, out) },
+	})
+	// Another worker took the order, or it was halted with its own reason.
+	if errors.Is(err, transfer.ErrStop) {
+		return nil
 	}
+	return err
+}
+
+// prepareEnergy makes the energy of one payout available. Burning TRX is never
+// an acceptable fallback for a withdrawal: it silently drains the hot wallet's
+// TRX at several times the rental price, so a rental outage stops the withdrawal
+// and alerts instead.
+func (w *Worker) prepareEnergy(ctx context.Context, row *model.WithdrawRecord, from string, need int64) error {
 	if !w.mgr.RentalEnabled() {
 		// energy.rental_enabled=false: nothing is rented, the transfer pays its
 		// own energy and bandwidth out of the hot wallet's TRX, so the TRX has to
 		// be there before anything is signed.
-		if err := w.checkBurnBudget(ctx, row, hot.Address, need); err != nil {
-			return err
-		}
-	} else if w.pool == nil || !w.pool.HasEnergyFor(ctx, need) {
-		requestID := fmt.Sprintf("withdraw-%d", row.ID)
-		// Burning TRX is never an acceptable fallback here: it silently drains
-		// the hot wallet's TRX at several times the rental price, so a rental
-		// outage stops the withdrawal and alerts instead.
-		if _, err := w.mgr.AcquireRented(ctx, "withdraw", hot.Address, need, requestID); err != nil {
-			return w.halt(ctx, row, FailCodeEnergyRental,
-				fmt.Sprintf("energy rental failed, withdrawal stopped (no TRX burn fallback): %v", err))
-		}
+		return w.checkBurnBudget(ctx, row, from, need)
 	}
+	if w.pool != nil && w.pool.HasEnergyFor(ctx, need) {
+		return nil
+	}
+	requestID := fmt.Sprintf("withdraw-%d", row.ID)
+	if _, err := w.mgr.AcquireRented(ctx, "withdraw", from, need, requestID); err != nil {
+		return w.halt(ctx, row, FailCodeEnergyRental,
+			fmt.Sprintf("energy rental failed, withdrawal stopped (no TRX burn fallback): %v", err))
+	}
+	return nil
+}
 
-	tx, err := w.gw.BuildTRC20Transfer(ctx, hot.Address, token.Contract, data, config.Cfg.WithdrawServer.FeeLimitSun)
-	if err != nil {
-		return err
+// logFailed reports a payout that failed before it was broadcast. The order
+// keeps its created state: nothing is on chain, so a later round retries it.
+func (w *Worker) logFailed(row *model.WithdrawRecord, failCode string, cause error) error {
+	if failCode == chain.FailSignature {
+		logrus.Error("withdraw sign failed", ",order_no:", row.OrderNo, ",from_address:", row.FromAddress,
+			",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits, ",err:", cause)
 	}
-	signed, err := w.sign.Sign(ctx, &signer.SignRequest{
-		Purpose: signer.PurposeWithdraw,
-		Path:    hot.Path,
-		Address: hot.Address,
-		Tx:      tx,
-		Meta: signer.SignMeta{
-			ToAddress:   row.ToAddress,
-			Contract:    token.Contract,
-			AmountUnits: row.AmountUnits,
-		},
-	})
-	if err != nil {
-		logrus.Error("withdraw sign failed", ",order_no:", row.OrderNo, ",from_address:", hot.Address,
-			",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits, ",err:", err)
-		return err
-	}
+	return nil
+}
+
+// persistSigned claims the order for this worker with a compare-and-swap on its
+// created state, so a duplicated worker cannot broadcast the same order twice.
+func (w *Worker) persistSigned(ctx context.Context, row *model.WithdrawRecord, signed *transfer.Signed) error {
 	// 签名成功：打印收款地址与金额，方便对着链上交易核对这笔提现付给了谁、付了多少。
+	hot := config.Cfg.Wallet.HotWallet
 	logrus.Info("withdraw sign ok", ",order_no:", row.OrderNo, ",from_address:", hot.Address,
 		",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
 		",amount:", amountText(row.AmountUnits, row.Decimals), ",txid:", signed.TxID)
-	expiry := time.Now().Add(time.Duration(w.expirationSeconds()) * time.Second)
 	res := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
 		UpdateColumns(map[string]any{
 			"status":       model.WithdrawStateSigned,
 			"txid":         signed.TxID, //交易哈希
-			"signed_raw":   signed.Tx.RawDataHex,
+			"signed_raw":   signed.RawDataHex,
 			"from_address": hot.Address,
-			"expired_at":   expiry,
+			"expired_at":   signed.ExpiredAt,
 			"updated_at":   time.Now(),
 		})
 	if res.Error != nil {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return nil // another worker took it
+		return transfer.ErrStop // another worker took it
 	}
-	row.TxID, row.SignedRaw, row.FromAddress = signed.TxID, signed.Tx.RawDataHex, hot.Address
-	return w.broadcast(ctx, row, signed.TxID, signed.Tx)
+	row.TxID, row.SignedRaw, row.FromAddress = signed.TxID, signed.RawDataHex, hot.Address
+	return nil
 }
 
-func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid string, tx *tron.Transaction) error {
+func (w *Worker) persistBroadcast(ctx context.Context, row *model.WithdrawRecord, out *transfer.Broadcast) error {
 	id := row.ID
-	result, err := w.gw.Broadcast(ctx, tx)
 	now := time.Now()
-	if err != nil {
-		failCode, permanent := chain.FailNode, false
-		if result != nil {
-			failCode, permanent = chain.ClassifyBroadcast(result.Code, result.Message)
-		}
-		if permanent {
+	if out.Err != nil {
+		if out.Permanent {
 			// These bytes will never be accepted, so the order is settled now and
 			// the business system can refund without waiting out the expiration.
-			row.TxID, row.FailCode = txid, failCode
+			row.FailCode = out.FailCode
 			if ferr := w.finish(ctx, *row, model.WithdrawStateFailed,
-				"broadcast rejected: "+err.Error(), failCode, 0, 0, now); ferr != nil {
+				"broadcast rejected: "+out.Err.Error(), out.FailCode, 0, 0, now); ferr != nil {
 				return ferr
 			}
-			return err
+			return nil
 		}
 		// A transient broadcast error is not a failed withdrawal: the transaction
 		// may already be propagating. Move to broadcast and let reconciliation
@@ -309,15 +326,15 @@ func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid 
 			Where("id = ? AND status = ?", id, model.WithdrawStateSigned).
 			UpdateColumns(map[string]any{
 				"status": model.WithdrawStateBroadcast, "broadcast_at": now,
-				"fail_reason": truncate(err.Error(), 240), "fail_code": failCode,
+				"fail_reason": truncate(out.Err.Error(), 240), "fail_code": out.FailCode,
 				"updated_at": now,
 			})
-		return err
+		return nil
 	}
 	store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", id, model.WithdrawStateSigned).
 		UpdateColumns(map[string]any{
-			"status": model.WithdrawStateBroadcast, "txid": result.TxID,
+			"status": model.WithdrawStateBroadcast, "txid": out.Result.TxID,
 			"broadcast_at": now, "fail_reason": "", "fail_code": "", "updated_at": now,
 		})
 	if w.pool != nil {
@@ -327,66 +344,44 @@ func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid 
 	logrus.Info("withdraw broadcast ok", ",order_no:", row.OrderNo, ",id:", id,
 		",from_address:", row.FromAddress, ",to_address:", row.ToAddress, ",symbol:", row.Symbol,
 		",amount_units:", row.AmountUnits, ",amount:", amountText(row.AmountUnits, row.Decimals),
-		",txid:", txid, ",duplicated:", result.Duplicated)
+		",txid:", row.TxID, ",duplicated:", out.Result.Duplicated)
 	return nil
 }
 
-// amountText renders the minimum-unit amount as a human readable token amount
-// (1000000 with 6 decimals -> "1"), so an operator reading the log sees the
-// same number the merchant asked for instead of counting zeros. The raw units
-// are always logged next to it.
-func amountText(units string, decimals int) string {
-	value, ok := new(big.Int).SetString(units, 10)
-	if !ok || decimals < 0 {
-		return units
-	}
-	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
-	whole, frac := new(big.Int).QuoRem(value, scale, new(big.Int))
-	if decimals == 0 || frac.Sign() == 0 {
-		return whole.String()
-	}
-	digits := strings.TrimRight(fmt.Sprintf("%0*s", decimals, frac.String()), "0")
-	return whole.String() + "." + digits
-}
+// amountText renders the minimum-unit amount as a human readable token amount,
+// so an operator reading the log sees the same number the merchant asked for.
+// The raw units are always logged next to it.
+func amountText(units string, decimals int) string { return transfer.AmountText(units, decimals) }
 
 // checkBurnBudget verifies the hot wallet can pay this transfer's energy and
 // bandwidth out of its own TRX. Signing without it would broadcast a transfer
 // that reverts with OUT_OF_ENERGY and still charges whatever TRX was there, so
 // the order is halted (funds intact, retried after a refill) instead.
 func (w *Worker) checkBurnBudget(ctx context.Context, row *model.WithdrawRecord, from string, need int64) error {
-	params, err := w.gw.GetChainParameters(ctx)
+	budget, err := w.exec.BurnBudget(ctx, from, need)
 	if err != nil {
-		return fmt.Errorf("withdraw: chain parameters query failed: %w", err)
+		return err
 	}
-	res, err := w.gw.GetAccountResource(ctx, from)
-	if err != nil {
-		return fmt.Errorf("withdraw: hot wallet resource query failed: %w", err)
-	}
-	costSun := energy.BurnCostSun(res, params, need)
-	if limit := config.Cfg.WithdrawServer.FeeLimitSun; limit > 0 && costSun > limit {
+	if limit := config.Cfg.WithdrawServer.FeeLimitSun; limit > 0 && budget.CostSun > limit {
 		return w.halt(ctx, row, FailCodeInsufficientTRX, fmt.Sprintf(
 			"burning TRX for this transfer costs %d sun, above withdraw_server.fee_limit_sun=%d",
-			costSun, limit))
+			budget.CostSun, limit))
 	}
-	balance, err := w.gw.GetTRXBalance(ctx, from)
-	if err != nil {
-		return fmt.Errorf("withdraw: hot wallet TRX balance query failed: %w", err)
-	}
-	if balance >= costSun {
+	if budget.Enough() {
 		logrus.Info("withdraw pays its fee by burning TRX", ",order_no:", row.OrderNo,
-			",energy_need:", need, ",cost_sun:", costSun, ",trx_balance_sun:", balance)
+			",energy_need:", need, ",cost_sun:", budget.CostSun, ",trx_balance_sun:", budget.BalanceSun)
 		return nil
 	}
 	return w.halt(ctx, row, FailCodeInsufficientTRX, fmt.Sprintf(
 		"hot wallet TRX insufficient to burn the fee: balance=%d sun required=%d sun (energy=%d)",
-		balance, costSun, need))
+		budget.BalanceSun, budget.CostSun, need))
 }
 
 // checkBalance verifies the hot wallet still holds enough of the order's token
 // for this order plus everything already signed or broadcast but not yet
 // confirmed, since those transfers will settle out of the same balance.
 func (w *Worker) checkBalance(ctx context.Context, row *model.WithdrawRecord, token config.TokenConfig, from string, amount *big.Int) error {
-	balance, err := w.tokenBalance(ctx, token.Contract, from)
+	balance, err := w.exec.TokenBalance(ctx, token.Contract, from)
 	if err != nil {
 		// A node error is transient: the order stays created and is retried,
 		// but nothing is signed on an unverified balance.
@@ -423,22 +418,6 @@ func (w *Worker) inflightUnits(ctx context.Context, contract, from string) (*big
 		return nil, fmt.Errorf("withdraw: cannot parse in-flight sum %q", sum)
 	}
 	return units, nil
-}
-
-func (w *Worker) tokenBalance(ctx context.Context, contract, address string) (*big.Int, error) {
-	data, err := tron.EncodeTRC20BalanceOf(address)
-	if err != nil {
-		return nil, err
-	}
-	out, _, err := w.gw.TriggerConstantContract(ctx, address, contract, data)
-	if err != nil {
-		return nil, err
-	}
-	value, ok := tron.ParseUint256(out)
-	if !ok {
-		return nil, fmt.Errorf("withdraw: cannot parse balance %q", out)
-	}
-	return value, nil
 }
 
 // halt records why the order did not move and alerts. The order keeps its
@@ -739,27 +718,16 @@ func (w *Worker) finalInfo(ctx context.Context, txid string, head int64) (*chain
 }
 
 func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) error {
-	tx := &tron.Transaction{TxID: row.TxID, RawDataHex: row.SignedRaw}
-	// The signature is not stored separately: sign-service is asked to sign the
-	// same raw data again, which is deterministic for the same key and payload.
-	signed, err := w.sign.Sign(ctx, &signer.SignRequest{
-		Purpose: signer.PurposeWithdraw,
-		Path:    config.Cfg.Wallet.HotWallet.Path,
-		Address: config.Cfg.Wallet.HotWallet.Address,
-		Tx:      tx,
-		Meta: signer.SignMeta{
-			ToAddress:   row.ToAddress,
-			Contract:    row.Contract,
-			AmountUnits: row.AmountUnits,
-		},
+	res, err := w.exec.Rebroadcast(ctx, transfer.RebroadcastRequest{
+		Purpose:     signer.PurposeWithdraw,
+		From:        config.Cfg.Wallet.HotWallet.Address,
+		DerivePath:  config.Cfg.Wallet.HotWallet.Path,
+		To:          row.ToAddress,
+		Contract:    row.Contract,
+		AmountUnits: row.AmountUnits,
+		TxID:        row.TxID,
+		SignedRaw:   row.SignedRaw,
 	})
-	if err != nil {
-		return err
-	}
-	if signed.TxID != row.TxID {
-		return fmt.Errorf("withdraw: refusing to rebroadcast, txid changed from %s to %s", row.TxID, signed.TxID)
-	}
-	res, err := w.gw.Broadcast(ctx, signed.Tx)
 	if err == nil {
 		logrus.Info("withdraw rebroadcast ok", ",order_no:", row.OrderNo, ",from_address:", row.FromAddress,
 			",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
@@ -861,9 +829,4 @@ func (w *Worker) expirationSeconds() int64 {
 	return 60
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
+func truncate(s string, n int) string { return transfer.Truncate(s, n) }

@@ -647,6 +647,9 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 	if final == nil {
 		return nil // on chain, not irreversible yet
 	}
+	// The block the transfer landed in is audited for every settled order,
+	// successful or failed.
+	row.BlockNumber = final.BlockNumber
 	if !final.Succeeded() {
 		reason := final.FailureReason()
 		failCode := chain.ClassifyReceipt(final)
@@ -799,6 +802,10 @@ func (w *Worker) finish(ctx context.Context, row model.WithdrawRecord, status, r
 		}
 		if status == model.WithdrawStateConfirmed {
 			updates["confirmed_at"] = now
+		}
+		// An order that never made it into a block keeps block_number at 0.
+		if row.BlockNumber > 0 {
+			updates["block_number"] = row.BlockNumber
 		}
 		res := tx.Model(&model.WithdrawRecord{}).
 			Where("id = ? AND status IN ?", row.ID,

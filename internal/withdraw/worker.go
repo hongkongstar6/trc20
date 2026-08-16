@@ -146,7 +146,7 @@ func (w *Worker) preflight(ctx context.Context) {
 		}
 		logrus.Info("withdraw preflight", ",hot_wallet:", hot.Address, ",path:", hot.Path,
 			",symbol:", token.Symbol, ",contract:", token.Contract,
-			",balance_units:", balance.String(), ",balance:", amountText(balance.String(), token.Decimals))
+			",balance_units:", balance.String(), ",balance:", model.FormatUnits(balance.String(), token.Decimals))
 	}
 	if trx, err := w.gw.GetTRXBalance(ctx, hot.Address); err != nil {
 		logrus.Warn("withdraw preflight: 热钱包 TRX 余额查询失败", ",err:", err)
@@ -268,7 +268,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	// 签名成功：打印收款地址与金额，方便对着链上交易核对这笔提现付给了谁、付了多少。
 	logrus.Info("withdraw sign ok", ",order_no:", row.OrderNo, ",from_address:", hot.Address,
 		",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
-		",amount:", amountText(row.AmountUnits, row.Decimals), ",txid:", signed.TxID)
+		",amount:", model.FormatUnits(row.AmountUnits, row.Decimals), ",txid:", signed.TxID)
 	expiry := time.Now().Add(time.Duration(w.expirationSeconds()) * time.Second)
 	res := store.MyStore.DB.WithContext(ctx).Model(&model.WithdrawRecord{}).
 		Where("id = ? AND status = ?", row.ID, model.WithdrawStateCreated).
@@ -333,27 +333,9 @@ func (w *Worker) broadcast(ctx context.Context, row *model.WithdrawRecord, txid 
 	// 广播成功：同样打印收款地址与金额，这是订单离开本系统前的最后一条记录。
 	logrus.Info("withdraw broadcast ok", ",order_no:", row.OrderNo, ",id:", id,
 		",from_address:", row.FromAddress, ",to_address:", row.ToAddress, ",symbol:", row.Symbol,
-		",amount_units:", row.AmountUnits, ",amount:", amountText(row.AmountUnits, row.Decimals),
+		",amount_units:", row.AmountUnits, ",amount:", model.FormatUnits(row.AmountUnits, row.Decimals),
 		",txid:", txid, ",duplicated:", result.Duplicated)
 	return nil
-}
-
-// amountText renders the minimum-unit amount as a human readable token amount
-// (1000000 with 6 decimals -> "1"), so an operator reading the log sees the
-// same number the merchant asked for instead of counting zeros. The raw units
-// are always logged next to it.
-func amountText(units string, decimals int) string {
-	value, ok := new(big.Int).SetString(units, 10)
-	if !ok || decimals < 0 {
-		return units
-	}
-	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
-	whole, frac := new(big.Int).QuoRem(value, scale, new(big.Int))
-	if decimals == 0 || frac.Sign() == 0 {
-		return whole.String()
-	}
-	digits := strings.TrimRight(fmt.Sprintf("%0*s", decimals, frac.String()), "0")
-	return whole.String() + "." + digits
 }
 
 // checkBurnBudget verifies the hot wallet can pay this transfer's energy and
@@ -692,7 +674,7 @@ func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, hea
 	}
 	logrus.Info("withdraw confirmed", ",order_no:", row.OrderNo, ",from_address:", row.FromAddress,
 		",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
-		",amount:", amountText(row.AmountUnits, row.Decimals), ",txid:", row.TxID, ",fee_sun:", final.Fee)
+		",amount:", model.FormatUnits(row.AmountUnits, row.Decimals), ",txid:", row.TxID, ",fee_sun:", final.Fee)
 	return w.finish(ctx, row, model.WithdrawStateConfirmed, "", "", final.Receipt.EnergyUsageTotal, final.Fee, now)
 }
 
@@ -777,7 +759,7 @@ func (w *Worker) rebroadcast(ctx context.Context, row model.WithdrawRecord) erro
 	if err == nil {
 		logrus.Info("withdraw rebroadcast ok", ",order_no:", row.OrderNo, ",from_address:", row.FromAddress,
 			",to_address:", row.ToAddress, ",symbol:", row.Symbol, ",amount_units:", row.AmountUnits,
-			",amount:", amountText(row.AmountUnits, row.Decimals), ",txid:", row.TxID)
+			",amount:", model.FormatUnits(row.AmountUnits, row.Decimals), ",txid:", row.TxID)
 		return nil
 	}
 	// A permanent rejection cannot become valid, so the order is settled now

@@ -142,6 +142,7 @@ func (t *Topup) refill(ctx context.Context, provider string, conf config.Provide
 		FromAddress:       t.cfg.SourceAddress,
 		ToAddress:         conf.DepositAddressUrl,
 		AmountTRX:         amount,
+		Amount:            model.FormatTRX(amount),
 		TriggerBalanceTRX: balance,
 		Status:            model.TopupStateCreated,
 		Operator:          "auto",

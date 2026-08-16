@@ -310,6 +310,8 @@ func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet
 		Symbol:       token.Symbol,
 		Contract:     token.Contract,
 		AmountUnits:  amount.String(),
+		Amount:       model.FormatUnits(amount.String(), token.Decimals),
+		Decimals:     token.Decimals,
 		Status:       model.SweepStateCreated,
 		RetryCount:   attempts,
 		DepositMaxID: depositMaxID,

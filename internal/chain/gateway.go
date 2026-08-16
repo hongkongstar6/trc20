@@ -31,7 +31,7 @@ var ErrNoNodeAvailable = errors.New("chain: no node available")
 
 // Gateway routes JSON HTTP calls to the healthiest node by priority.
 type Gateway struct {
-	nodes            []*node
+	nodes            []*node //存储了什么？
 	retryPerNode     int
 	solidityConfirm  bool
 	broadcastTimeout time.Duration
@@ -525,8 +525,10 @@ func (g *Gateway) BuildTRXTransfer(ctx context.Context, from, to string, amountS
 	if err != nil {
 		return nil, err
 	}
-	var tx tron.Transaction
+	var tx tron.Transaction //post请求返回的数据
 	body := map[string]any{"owner_address": fromHex, "to_address": toHex, "amount": amountSun}
+
+	//createtransaction就是创建trx交易
 	if err := g.call(ctx, g.walletPath("/createtransaction", false), body, &tx); err != nil {
 		return nil, err
 	}

@@ -18,13 +18,11 @@ import (
 // a low water mark, which turns ~200 orders/day into ~20 and makes withdrawals
 // wait for nothing.
 type Pool struct {
-	cfg    config.EnergyPoolConfig
-	energy config.EnergyConfig
-	mgr    *Manager
-	gw     *chain.Gateway
-	//log    *logrus.Logger
-	addr string
-
+	cfg          config.EnergyPoolConfig
+	energy       config.EnergyConfig
+	mgr          *Manager
+	gw           *chain.Gateway
+	addr         string
 	lastHourUsed int64
 	hourStart    time.Time
 }

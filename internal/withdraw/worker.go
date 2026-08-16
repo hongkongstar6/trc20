@@ -585,7 +585,8 @@ func (w *Worker) reject(ctx context.Context, row *model.WithdrawRecord, reason s
 }
 
 // Reconcile settles broadcast withdrawals and notifies the business system exactly once per order.
-// 对账结算广播提款，并按订单向业务系统发送一次通知。
+// 提现的“对账/结算”环节（withdraw 服务定时循环调用），负责把已签名/已广播的订单跟链上真实结果对齐并结单通知商户
+// 一轮批处理调度器 — 取 status 为 signed/broadcast 的订单（id 升序，最多 100 条）；若未启用 solidity 确认，则先读当前区块高度 head 用作确认深度基准；逐条调 reconcileOne，单条出错只记日志不影响其它订单。
 func (w *Worker) Reconcile(ctx context.Context) error {
 	var rows []model.WithdrawRecord
 	err := store.MyStore.DB.WithContext(ctx).
@@ -613,6 +614,15 @@ func (w *Worker) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+// 单笔订单的状态机推进：
+// 无 txid 跳过；用 txid 查链上回执。
+// 链上查不到：未过期就用原签名字节重新广播（绝不重新构造交易，避免重复付款）；已过期则结单为 failed（FailExpired），由业务方退款。
+// 已上链但未达到不可逆（solidity 节点/confirm_blocks 深度）：先不结论，下一轮再看。
+// 拿到最终回执后记录所在区块 block_number；回执失败 → failed + 分类失败码；回执 SUCCESS 但没有匹配的
+//
+//	TRC20 Transfer 事件（金额/收付地址/合约都要对上）→ failed（FailNoTransfer），防止把没真正转出的交易报成成功；
+//
+// 全部通过 → confirmed，写 energy_used / fee_sun / confirmed_at，并通过事务性 outbox 向该订单的 notify_url 发一次结果通知（成功和失败都通知，且每单只一次）。
 func (w *Worker) reconcileOne(ctx context.Context, row model.WithdrawRecord, head int64) error {
 	if row.TxID == "" {
 		return nil

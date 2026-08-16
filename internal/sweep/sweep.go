@@ -278,7 +278,7 @@ func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet
 	if err != nil {
 		return err
 	}
-	//第2步：只读预执行估算能量。triggerconstantcontract 不校验发起地址的能量/TRX,
+	//第2步：只读预执行估算能量,triggerconstantcontract 不校验发起地址的能量/TRX,
 	//也不返回带 expiration 的交易,所以它可以安全地排在租赁之前
 	factor := energy.RetrySafetyFactor(attempts)
 	need, err := s.mgr.EstimateEnergyFactor(ctx, wallet.Address, token.Contract, data, factor)

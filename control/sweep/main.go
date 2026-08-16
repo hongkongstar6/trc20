@@ -51,9 +51,9 @@ func main() {
 	topup := energy.NewTopup(config.Cfg.Energy.AutoTopup, store.MyStore, app.Gateway, signClient,
 		mgr.Providers(), config.Cfg.Wallet.GasAccount.Path)
 	// Both loops only exist to serve the rental platforms: with
-	// energy.rental_enabled=false there is no order to reconcile and no prepaid
-	// balance to refill, every sweep burns the deposit address' own TRX.
-	rentalOn := config.Cfg.Energy.RentalOn()
+	// sweep_server.energy_rental=false there is no order to reconcile and no
+	// prepaid balance to refill, every sweep burns the deposit address' own TRX.
+	rentalOn := config.Cfg.SweepRentalOn()
 	if rentalOn {
 		go func() {
 			if err := mgr.RunReconcile(ctx); err != nil {
@@ -67,7 +67,7 @@ func main() {
 			}
 		}()
 	} else {
-		logrus.Info("energy rental disabled, sweeps pay their fee by burning TRX")
+		logrus.Info("sweep_server.energy_rental=false, sweeps pay their fee by burning TRX")
 	}
 
 	svc, err := sweep.New(app.Gateway, signClient, mgr, pricer)

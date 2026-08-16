@@ -224,6 +224,13 @@ type WithdrawConfig struct {
 	// and alerted on forever. 0 falls back to DefaultHaltMaxRetries.
 	// 提现因热钱包余额/能量等原因停下的最大重试次数，超过后直接结单为提现失败并回调业务方。
 	HaltMaxRetries int `yaml:"halt_max_retries"`
+	// EnergyRental picks where a withdrawal takes its energy and bandwidth from:
+	// true rents from a third party platform, false burns the hot wallet's own
+	// TRX. Unset falls back to energy.rental_enabled. Whichever is chosen is the
+	// only way used — a failed rental never falls back to burning TRX and a hot
+	// wallet without TRX never falls back to renting; the order stops instead.
+	// 提现能量来源：true 走第三方租赁，false 烧热钱包自己的 TRX，二者不互相兜底。
+	EnergyRental *bool `yaml:"energy_rental"`
 }
 
 type SweepConfig struct {
@@ -243,6 +250,10 @@ type SweepConfig struct {
 	// exhausted the address is left alone and logged for manual handling, so a
 	// systematically failing address cannot burn fees round after round.
 	MaxEnergyRetries int `yaml:"max_energy_retries"`
+	// EnergyRental picks where a sweep takes its energy and bandwidth from, with
+	// the same semantics as withdraw_server.energy_rental.
+	// 归集能量来源：true 走第三方租赁，false 烧归集地址自己的 TRX，二者不互相兜底。
+	EnergyRental *bool `yaml:"energy_rental"`
 }
 
 // SweepThresholdConfig drives the runtime break-even computation of min_sweep.
@@ -299,6 +310,24 @@ type EnergyConfig struct {
 
 // RentalOn reports whether third party rental is in use.
 func (c EnergyConfig) RentalOn() bool { return c.RentalEnabled == nil || *c.RentalEnabled }
+
+// SweepRentalOn reports whether sweeps rent their energy instead of burning the
+// deposit address' TRX.
+func (c *Config) SweepRentalOn() bool {
+	if c.SweepServer.EnergyRental != nil {
+		return *c.SweepServer.EnergyRental
+	}
+	return c.Energy.RentalOn()
+}
+
+// WithdrawRentalOn reports whether withdrawals rent their energy instead of
+// burning the hot wallet's TRX.
+func (c *Config) WithdrawRentalOn() bool {
+	if c.WithdrawServer.EnergyRental != nil {
+		return *c.WithdrawServer.EnergyRental
+	}
+	return c.Energy.RentalOn()
+}
 
 type ProviderConf struct {
 	Enabled bool `yaml:"enabled"`
@@ -591,6 +620,28 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Energy.Mode == "" {
 		c.Energy.Mode = "cheapest"
+	}
+	// Sweep and withdraw each pick their own energy source, so the rental stack
+	// is only shut down when neither of them rents, and the hot wallet energy
+	// pool only exists for withdrawals that do.
+	sweepRental, withdrawRental := c.SweepRentalOn(), c.WithdrawRentalOn()
+	c.SweepServer.EnergyRental, c.WithdrawServer.EnergyRental = &sweepRental, &withdrawRental
+	anyRental := sweepRental || withdrawRental
+	c.Energy.RentalEnabled = &anyRental
+	if !withdrawRental {
+		c.Energy.Pool.Enabled = false
+	}
+	if anyRental {
+		// A flow that burns TRX needs the trx_burn provider to price the burn,
+		// and it is never selected for a flow that rents (ExcludeBurn).
+		if !sweepRental || !withdrawRental {
+			if c.Energy.Providers == nil {
+				c.Energy.Providers = map[string]ProviderConf{}
+			}
+			burn := c.Energy.Providers[ProviderTRXBurn]
+			burn.Enabled = true
+			c.Energy.Providers[ProviderTRXBurn] = burn
+		}
 	}
 	if !c.Energy.RentalOn() {
 		// trx_burn is the only way left to pay a fee, so the selection is pinned

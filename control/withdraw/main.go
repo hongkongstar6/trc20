@@ -34,9 +34,10 @@ func main() {
 		return
 	}
 	pool := energy.NewPool(config.Cfg.Energy, mgr, app.Gateway, nil, config.Cfg.Wallet.HotWallet.Address)
-	// With energy.rental_enabled=false there are no rental orders to reconcile and
-	// no pool to keep delegated: every transfer burns the hot wallet's TRX.
-	if config.Cfg.Energy.RentalOn() {
+	// With withdraw_server.energy_rental=false there are no rental orders to
+	// reconcile and no pool to keep delegated: every transfer burns the hot
+	// wallet's TRX.
+	if config.Cfg.WithdrawRentalOn() {
 		go func() {
 			if err := mgr.RunReconcile(ctx); err != nil {
 				logrus.Error("energy order reconcile loop stopped,", ",err:", err)
@@ -48,7 +49,7 @@ func main() {
 			}
 		}()
 	} else {
-		logrus.Info("energy rental disabled, withdrawals pay their fee by burning TRX")
+		logrus.Info("withdraw_server.energy_rental=false, withdrawals pay their fee by burning TRX")
 	}
 
 	worker, err := withdraw.New(store.MyStore, app.Gateway, signClient, mgr, pool, nil)

@@ -128,9 +128,15 @@ Nile 上它们完全无法使用；它们在主网上以小额交易进行验证
 
 ## 能源
 
-`energy.rental_enabled` 决定是否向第三方平台租赁能量/带宽，**默认 true**（不写
-这项就是租赁，行为与以前一致）。改成 `false` 后不再租赁，每笔转账直接烧发起地址
-自己的 TRX：`mode` 固定为 `fixed` + `trx_burn`，能量池（`energy.pool`）与预付
+能量/带宽只有两个来源：向第三方平台租赁，或者烧发起地址自己的 TRX。归集与提现
+分别由 `sweep_server.energy_rental` 与 `withdraw_server.energy_rental` 控制
+（`true` 租赁，`false` 烧 TRX），两者互不影响；留空则跟随全局的
+`energy.rental_enabled`（**默认 true**）。**选定的途径不互相兜底**：租赁失败不会
+改成烧 TRX，地址没有 TRX 也不会改成租赁，两种情况都直接取消下一步（提现 `halt`、
+归集本轮跳过）并打 error 日志。
+
+两条流程都不租赁时（等价于 `energy.rental_enabled: false`），每笔转账直接烧发起
+地址自己的 TRX：`mode` 固定为 `fixed` + `trx_burn`，能量池（`energy.pool`）与预付
 余额自动充值（`energy.auto_topup`）关闭，租赁订单对账协程也不再启动。Nile 测试
 网只能这么用（两家平台都没有测试环境），`configs/config.nile.yaml` 已置为
 `false`。
@@ -151,9 +157,9 @@ Nile 上它们完全无法使用；它们在主网上以小额交易进行验证
 
 实际能源需求，包括每个平台的最低订单金额。
 
-- 如果租用失败或超时，则会回退到销毁 TRX，因此平台故障
+- 如果租用失败或超时，不会回退到销毁 TRX：本次归集/提现直接取消并打 error
 
-不会导致支付中断。
+日志，等租赁链路恢复后重跑。
 
 - `min_sweep` 在运行时根据实时报价和链上
 
@@ -217,7 +223,7 @@ Nile 上它们完全无法使用；它们在主网上以小额交易进行验证
 | --- | --- | --- | --- |
 | 发起地址（热钱包）USDT 余额 | 签名前 `balanceOf(热钱包)` ≥ 本单金额 + 已签名/已广播未确认的在途金额 | 停止本单并打 `ALERT` 日志，等财务补币 | `hot_wallet_insufficient` |
 | 能量来自租赁 | 能量池不够时逐笔租（`AcquireRented`），**不再降级烧 TRX** | 停止本单并打 `ALERT` 日志，等租赁链路恢复 | `energy_rental_failed` |
-| 热钱包 TRX 够烧（仅 `energy.rental_enabled: false`） | 签名前按缺口能量+带宽算出所需 TRX 并比对热钱包余额 | 停止本单并打 `ALERT` 日志，等财务补 TRX | `hot_wallet_trx_insufficient` |
+| 热钱包 TRX 够烧（仅 `withdraw_server.energy_rental: false`） | 签名前按缺口能量+带宽算出所需 TRX 并比对热钱包余额 | 停止本单并打 `ALERT` 日志，等财务补 TRX | `hot_wallet_trx_insufficient` |
 
 余额校验放在租赁与签名之前：余额不足的转账在链上会 revert 但手续费照付，而且钱只是
 「还没到账」，把订单判失败会让业务侧误退款。热钱包能量池（`energy.pool`）同样只租不烧，

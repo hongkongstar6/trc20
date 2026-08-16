@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -356,7 +355,7 @@ type createWithdrawRequest struct {
 	Symbol     string `json:"symbol" binding:"required"`      //提现币种 USDC / USDT / BNB / BTC / SOL / ETH /TRX
 	Chain      string `json:"chain" binding:"required"`       //链类型:ETH / TRON / BSC / BTC / SOL
 	ToAddress  string `json:"to_address" binding:"required"`  //提现地址
-	Amount     string `json:"amount" binding:"required"`      //提现金额 minimum units
+	Amount     string `json:"amount" binding:"required"`      //提现金额，币种本位："11" = 11 USDT，小数位不得超过币种精度
 	NotifyUrl  string `json:"notify_url" binding:"required"`  //异步通知地址
 	OrderTime  int64  `json:"order_time" binding:"required"`  //下单时间戳秒
 	ClientIp   string `json:"client_ip" binding:"required"`   //用户ip
@@ -387,11 +386,6 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "notify_url must be an absolute http(s) URL"})
 		return
 	}
-	amount, ok := new(big.Int).SetString(req.Amount, 10)
-	if !ok || amount.Sign() <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "amount must be a positive integer in minimum units"})
-		return
-	}
 	if !strings.EqualFold(req.Chain, model.ChainTRON) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported chain: " + req.Chain})
 		return
@@ -399,6 +393,12 @@ func (s *Server) createWithdraw(c *gin.Context) {
 	token, ok := config.Cfg.EnabledToken(req.Symbol)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported symbol: " + req.Symbol})
+		return
+	}
+	// amount 是币种本位的金额（"11" 就是 11 USDT），按币种精度换算成链上最小单位后入库。
+	amount, err := parseTokenAmount(req.Amount, token.Decimals)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 

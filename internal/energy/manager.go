@@ -266,6 +266,50 @@ func (m *Manager) acquire(ctx context.Context, purpose, receiver string, need in
 	return row, nil
 }
 
+// AcquireBurn records the fee of a transfer that pays its own energy and
+// bandwidth out of the signing address' TRX. No platform is contacted: the
+// caller has already verified the address holds the TRX, and the row exists so
+// the burn shows up in the fee accounting next to the rentals.
+func (m *Manager) AcquireBurn(ctx context.Context, purpose, receiver string, need int64, requestID string) (*model.EnergyRentOrder, error) {
+	cost := m.burnCostTRX(ctx, need)
+	row := &model.EnergyRentOrder{
+		Provider:        ProviderTRXBurn,
+		RequestID:       requestID,
+		ReceiveAddress:  receiver,
+		ResourceType:    ResourceEnergy,
+		RequestedEnergy: need,
+		Period:          m.defaultPeriod(),
+		CostTRX:         cost,
+		Status:          model.EnergyOrderCreated,
+		Purpose:         purpose,
+		BaselineEnergy:  m.availableEnergy(ctx, receiver),
+	}
+	if err := store.MyStore.DB.WithContext(ctx).Create(row).Error; err != nil {
+		var existing model.EnergyRentOrder
+		if e := store.MyStore.DB.WithContext(ctx).Where("request_id = ?", requestID).Take(&existing).Error; e != nil {
+			return nil, err
+		}
+		row = &existing
+	}
+	m.markDelegated(ctx, row, &Order{State: StateDelegated, ProviderState: FeeModeBurn, CostTRX: cost})
+	return row, nil
+}
+
+// burnCostTRX prices the burn through the trx_burn provider when it is built.
+// An unpriced burn is still a valid burn, so a missing provider costs nothing
+// but the accounting figure.
+func (m *Manager) burnCostTRX(ctx context.Context, need int64) float64 {
+	p, ok := m.provs[ProviderTRXBurn]
+	if !ok {
+		return 0
+	}
+	q, err := p.Quote(ctx, QuoteRequest{Resource: ResourceEnergy, Amount: need, Period: m.defaultPeriod()})
+	if err != nil {
+		return 0
+	}
+	return q.CostTRX
+}
+
 // wait polls the provider (neither platform has a usable callback) and then
 // verifies the delegation on chain, because the provider saying "delegated" is
 // not proof that our address can actually spend the energy.

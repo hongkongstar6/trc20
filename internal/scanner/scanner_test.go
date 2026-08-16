@@ -1,6 +1,10 @@
 package scanner
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hongkongstar6/trc20/internal/chain"
@@ -131,4 +135,61 @@ func TestDepositEventIDIsStable(t *testing.T) {
 	if got := depositEventID(rec); got != "abc123:3" {
 		t.Fatalf("event id = %s, want abc123:3", got)
 	}
+}
+
+// A contract of another network is unknown to the node: the scanner would keep
+// polling blocks and silently drop every Transfer log, so the mismatch has to
+// surface as an error before scanning starts.
+func TestVerifyTokensRejectsAContractTheChainDoesNotKnow(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	s := newTestScanner(t, "0")
+	s.gw = testGateway(t, srv.URL)
+	err := s.VerifyTokens(context.Background())
+	if err == nil || !strings.Contains(err.Error(), usdtBase58) {
+		t.Fatalf("err = %v, want the unknown contract to be named", err)
+	}
+}
+
+func TestVerifyTokensAcceptsAKnownContract(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"contract_address":"` + usdtHexLog + `"}`))
+	}))
+	defer srv.Close()
+
+	s := newTestScanner(t, "0")
+	s.gw = testGateway(t, srv.URL)
+	if err := s.VerifyTokens(context.Background()); err != nil {
+		t.Fatalf("VerifyTokens: %v", err)
+	}
+}
+
+// A node outage says nothing about the allowlist, so it must not stop the
+// scanner from starting.
+func TestVerifyTokensIgnoresANodeOutage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	s := newTestScanner(t, "0")
+	s.gw = testGateway(t, srv.URL)
+	if err := s.VerifyTokens(context.Background()); err != nil {
+		t.Fatalf("VerifyTokens: %v", err)
+	}
+}
+
+func testGateway(t *testing.T, endpoint string) *chain.Gateway {
+	t.Helper()
+	gw, err := chain.NewGateway(config.ChainConfig{
+		ChainNodes:   []config.NodeConfig{{Name: "node", Endpoint: endpoint, Priority: 1, Enabled: true, Timeout: "5s"}},
+		RetryPerNode: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	return gw
 }

@@ -91,7 +91,7 @@ wallet:
           contract: "${USDC_CONTRACT:-}"
           decimals: 6
           enabled: false
-    # 系统地址：withdraw 需要 hot_wallet 的 address+path，sweep 需要 finance_wallet
+    # 系统地址：withdraw 需要 hot_wallet 的 address+path，sweep 需要 sweep_wallet
     hot_wallet:
         # address: "${HOT_WALLET_ADDRESS}" #提现付款地址
         # path: "m/44'/195'/1'/0/0"

@@ -25,6 +25,10 @@ import (
 	_ "github.com/hongkongstar6/trc20/internal/energy/trxburn"
 )
 
+// defaultConfigName is the config used when neither -config nor CONFIG_PATH
+// says otherwise.
+const defaultConfigName = "configs/config.nile.yaml"
+
 type App struct {
 	//Cfg *config.Config
 	//Log     *logrus.Logger //*slog.Logger
@@ -106,17 +110,17 @@ func Context() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 }
 
-// defaultConfigPath finds configs/config.yaml (falling back to the nile
-// example) by walking up from the working directory, so debugging a cmd/* from
-// an IDE works without passing -config.
+// defaultConfigPath finds the nile config by walking up from the working
+// directory, so debugging a cmd/* from an IDE works without passing -config.
+// The default is deliberately the testnet: mainnet has to be asked for with
+// -config configs/config.yaml or CONFIG_PATH, because a process that silently
+// picks the mainnet allowlist while talking to nile scans blocks forever
+// without ever matching a deposit.
 func defaultConfigPath() string {
-	return "configs/config.nile.yaml"
-	// for _, name := range []string{"configs/config.yaml", "configs/config.nile.yaml"} {
-	// 	if p, ok := config.FindUp("", name); ok {
-	// 		return p
-	// 	}
-	// }
-	// return "configs/config.yaml"
+	if p, ok := config.FindUp("", defaultConfigName); ok {
+		return p
+	}
+	return defaultConfigName
 }
 
 func envOr(key, def string) string {

@@ -41,6 +41,13 @@ func main() {
 	}()
 
 	s := scanner.New(app.Gateway)
+	// A contract allowlist belonging to another network is indistinguishable
+	// from "no deposits happened" at runtime, so it has to stop the process
+	// here instead of being discovered by a missing deposit.
+	if err := s.VerifyTokens(ctx); err != nil {
+		logrus.Error("token allowlist does not match the connected chain", ",err:", err)
+		panic(err)
+	}
 	logrus.Info("deposit scanner starting",
 		",confirmations:", config.Cfg.Deposit.Confirmations, ",batch_blocks:", config.Cfg.Deposit.BatchBlocks)
 	if err := s.Run(ctx); err != nil {

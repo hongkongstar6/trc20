@@ -66,7 +66,11 @@ type LogConfig struct {
 	// stdout only. Files are rotated daily and named "<service>-YYYY-MM-DD.log".
 	LogDir         string `yaml:"log_dir"`
 	Output_Console bool   `yaml:"output_console"` //是否输出至控制台
-	Output_File    bool   `yaml:"output_file"`    //是否支持输出至文件
+	// Output_File switches the daily log file off while log_dir stays set. It is
+	// a pointer so an omitted key keeps writing files: as a plain bool it
+	// defaults to false, which silences the file log of every config that does
+	// not spell the key out.
+	Output_File *bool `yaml:"output_file"` //是否支持输出至文件
 
 }
 

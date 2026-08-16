@@ -170,6 +170,9 @@ type WithdrawRecord struct {
 	// 提现因人工原因停下的次数，达到配置上限后订单结单为失败
 	HaltCount int    `gorm:"column:halt_count;default:0" json:"halt_count"`
 	TxID      string `gorm:"column:txid;size:70;index" json:"txid"` //交易的链hash
+	// BlockNumber is the block the transfer was included in, written when the
+	// receipt is read. It stays 0 while the order has not been included.
+	BlockNumber int64 `gorm:"column:block_number;index" json:"block_number"`
 	// SignedRaw is the exact signed transaction. A retry always rebroadcasts
 	// these bytes; a second transaction is only built after expiration and
 	// only when the txid is provably absent from the chain.
@@ -194,10 +197,13 @@ type SweepRecord struct {
 	Contract    string `gorm:"size:64" json:"contract"`
 	AmountUnits string `gorm:"type:decimal(38,0)" json:"amount_units"`
 	// Amount is amount_units in token units, as text: "13" / "12.345678".
-	Amount      string     `gorm:"size:64" json:"amount"`
-	Decimals    int        `gorm:"size:32" json:"decimals"`
-	Status      string     `gorm:"size:16;index" json:"status"`
-	TxID        string     `gorm:"column:txid;size:70;index" json:"txid"`
+	Amount   string `gorm:"size:64" json:"amount"`
+	Decimals int    `gorm:"size:32" json:"decimals"`
+	Status   string `gorm:"size:16;index" json:"status"`
+	TxID     string `gorm:"column:txid;size:70;index" json:"txid"`
+	// BlockNumber is the block the sweep transfer was included in, written when
+	// its receipt is read.
+	BlockNumber int64      `gorm:"column:block_number;index" json:"block_number"`
 	SignedRaw   string     `gorm:"type:text" json:"-"`
 	ExpiredAt   *time.Time `json:"expired_at"`
 	FeeMode     string     `gorm:"size:24" json:"fee_mode"` // rent:<provider> | burn
@@ -269,14 +275,17 @@ type EnergyRentOrder struct {
 	CostTRX        float64 `json:"cost_trx"`
 	// Amount is what this order pays the provider, in TRX, as text: "13" /
 	// "12.345678". It mirrors cost_trx without float formatting surprises.
-	Amount         string     `gorm:"size:64" json:"amount"`
-	Status         string     `gorm:"size:16;index" json:"status"`
-	ProviderStatus string     `gorm:"size:32" json:"provider_status"`
-	DelegateTxID   string     `gorm:"column:delegate_txid;size:70" json:"delegate_txid"`
-	Purpose        string     `gorm:"size:24" json:"purpose"` // sweep | hot_pool
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	FinishedAt     *time.Time `json:"finished_at"`
+	Amount         string `gorm:"size:64" json:"amount"`
+	Status         string `gorm:"size:16;index" json:"status"`
+	ProviderStatus string `gorm:"size:32" json:"provider_status"`
+	DelegateTxID   string `gorm:"column:delegate_txid;size:70" json:"delegate_txid"`
+	// BlockNumber is the block delegate_txid was included in. A burn order has
+	// no delegation transaction, so it stays 0.
+	BlockNumber int64      `gorm:"column:block_number;index" json:"block_number"`
+	Purpose     string     `gorm:"size:24" json:"purpose"` // sweep | hot_pool
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	FinishedAt  *time.Time `json:"finished_at"`
 }
 
 func (EnergyRentOrder) TableName() string { return "energy_rent_order" }
@@ -290,15 +299,18 @@ type TopupRecord struct {
 	ToAddress   string  `gorm:"size:64" json:"to_address"`
 	AmountTRX   float64 `json:"amount_trx"`
 	// Amount is amount_trx as text: "13" / "12.345678".
-	Amount            string     `gorm:"size:64" json:"amount"`
-	TriggerBalanceTRX float64    `json:"trigger_balance_trx"`
-	TxID              string     `gorm:"column:txid;size:70;index" json:"txid"`
-	Status            string     `gorm:"size:16;index" json:"status"`
-	Operator          string     `gorm:"size:32" json:"operator"` // auto | <user>
-	FailReason        string     `gorm:"size:255" json:"fail_reason"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	ConfirmedAt       *time.Time `json:"confirmed_at"`
+	Amount            string  `gorm:"size:64" json:"amount"`
+	TriggerBalanceTRX float64 `json:"trigger_balance_trx"`
+	TxID              string  `gorm:"column:txid;size:70;index" json:"txid"`
+	// BlockNumber is the block the TRX transfer was included in, written when
+	// the refill is confirmed on chain.
+	BlockNumber int64      `gorm:"column:block_number;index" json:"block_number"`
+	Status      string     `gorm:"size:16;index" json:"status"`
+	Operator    string     `gorm:"size:32" json:"operator"` // auto | <user>
+	FailReason  string     `gorm:"size:255" json:"fail_reason"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	ConfirmedAt *time.Time `json:"confirmed_at"`
 }
 
 func (TopupRecord) TableName() string { return "topup_record" }

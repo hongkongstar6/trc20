@@ -256,12 +256,14 @@ func (t *Topup) Reconcile(ctx context.Context) error {
 		}
 		if !info.Succeeded() {
 			store.MyStore.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
-				UpdateColumns(map[string]any{"status": model.TopupStateFailed, "fail_reason": "on-chain failure", "updated_at": now})
+				UpdateColumns(map[string]any{"status": model.TopupStateFailed, "fail_reason": "on-chain failure",
+					"block_number": info.BlockNumber, "updated_at": now})
 			continue
 		}
 		if row.Status == model.TopupStateBroadcast {
 			store.MyStore.DB.WithContext(ctx).Model(&model.TopupRecord{}).Where("id = ?", row.ID).
-				UpdateColumns(map[string]any{"status": model.TopupStateConfirmed, "confirmed_at": now, "updated_at": now})
+				UpdateColumns(map[string]any{"status": model.TopupStateConfirmed, "confirmed_at": now,
+					"block_number": info.BlockNumber, "updated_at": now})
 		}
 		prov, ok := t.provs[row.Provider]
 		if !ok {

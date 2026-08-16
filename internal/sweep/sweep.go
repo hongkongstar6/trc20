@@ -528,7 +528,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			store.MyStore.DB.WithContext(ctx).Model(&model.SweepRecord{}).Where("id = ?", row.ID).
 				UpdateColumns(map[string]any{
 					"status": model.SweepStateFailed, "fail_reason": truncate(reason, 240),
-					"fail_code": failCode, "updated_at": now,
+					"fail_code": failCode, "block_number": info.BlockNumber, "updated_at": now,
 				})
 			// OUT_OF_ENERGY leaves the USDT untouched, so the next round retries the
 			// address with more head room; anything else repeats identically and is
@@ -550,6 +550,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 					"status":       model.SweepStateConfirmed,
 					"confirmed_at": now,
 					"energy_used":  info.Receipt.EnergyUsageTotal,
+					"block_number": info.BlockNumber,
 					"updated_at":   now,
 				}).Error; err != nil {
 				return err

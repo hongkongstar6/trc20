@@ -398,12 +398,33 @@ func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder,
 			updates["cost_trx"] = order.CostTRX
 			updates["amount"] = model.FormatTRX(order.CostTRX)
 		}
+		if block := m.delegateBlock(ctx, order.DelegateTxID); block > 0 {
+			updates["block_number"] = block
+		}
 	}
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).
 		Where("id = ?", row.ID).UpdateColumns(updates).Error; err != nil {
 		logrus.Error("update energy order failed", ",id:", row.ID, ",err:", err)
 	}
 	row.Status = model.EnergyOrderDelegated
+}
+
+// delegateBlock reads the block the provider's delegation transaction landed
+// in. It is audit data only, so an unreadable receipt is not an error: the
+// order is still delegated and the column simply stays 0.
+func (m *Manager) delegateBlock(ctx context.Context, txid string) int64 {
+	if txid == "" || m.gw == nil {
+		return 0
+	}
+	info, err := m.gw.GetTxInfoByID(ctx, txid)
+	if err != nil {
+		logrus.Warn("delegation block read failed", ",txid:", txid, ",err:", err)
+		return 0
+	}
+	if info == nil {
+		return 0
+	}
+	return info.BlockNumber
 }
 
 // EstimateEnergy asks the chain how much energy a transfer would consume.

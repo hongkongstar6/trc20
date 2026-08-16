@@ -28,6 +28,7 @@ import (
 	"github.com/hongkongstar6/trc20/internal/model"
 	"github.com/hongkongstar6/trc20/internal/signer"
 	"github.com/hongkongstar6/trc20/internal/store"
+	"github.com/hongkongstar6/trc20/internal/transfer"
 	"github.com/hongkongstar6/trc20/internal/tron"
 	"github.com/sirupsen/logrus"
 )
@@ -39,7 +40,10 @@ type Service struct {
 	sign   *signer.Client
 	mgr    *energy.Manager
 	pricer *energy.Pricer
-	log    *logrus.Logger
+	// exec runs the transfer itself, which is the part a sweep shares with a
+	// withdrawal: estimate, energy, build, sign, broadcast.
+	exec *transfer.Executor
+	log  *logrus.Logger
 	// tokens are every enabled token. Each is swept on its own: one deposit
 	// address can hold a USDT and a USDC balance at the same time and each of
 	// them needs its own transfer, threshold and energy.
@@ -54,7 +58,8 @@ func New(gw *chain.Gateway, sign *signer.Client, mgr *energy.Manager, pricer *en
 	if config.Cfg.Wallet.SweepWallet.Address == "" {
 		return nil, errors.New("sweep: wallet.sweep_wallet.address is required")
 	}
-	return &Service{gw: gw, sign: sign, mgr: mgr, pricer: pricer, tokens: tokens, log: logrus.StandardLogger()}, nil
+	return &Service{gw: gw, sign: sign, mgr: mgr, pricer: pricer,
+		exec: transfer.NewExecutor(gw, sign, mgr), tokens: tokens, log: logrus.StandardLogger()}, nil
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -102,7 +107,7 @@ func (s *Service) roundToken(ctx context.Context, token config.TokenConfig) erro
 	minUnits := s.minSweepUnits(token)
 	maxSkips := config.Cfg.SweepServer.Threshold.MaxSkipRounds
 	for _, addr := range candidates {
-		balance, err := s.tokenBalance(ctx, token.Contract, addr.Address)
+		balance, err := s.exec.TokenBalance(ctx, token.Contract, addr.Address)
 		if err != nil {
 			s.log.Error("balance query failed", "address", addr.Address,
 				"symbol", token.Symbol, ",err:", err)
@@ -213,23 +218,6 @@ func (s *Service) isStale(ctx context.Context, token config.TokenConfig, address
 	return time.Since(oldest.CreatedAt) > time.Duration(days)*24*time.Hour
 }
 
-// 预估交易需要的能量
-func (s *Service) tokenBalance(ctx context.Context, contract, address string) (*big.Int, error) {
-	data, err := tron.EncodeTRC20BalanceOf(address)
-	if err != nil {
-		return nil, err
-	}
-	out, _, err := s.gw.TriggerConstantContract(ctx, address, contract, data)
-	if err != nil {
-		return nil, err
-	}
-	value, ok := tron.ParseUint256(out)
-	if !ok {
-		return nil, fmt.Errorf("sweep: cannot parse balance %q", out)
-	}
-	return value, nil
-}
-
 // 1.查发起方 USDT 余额、查波场实时能量单价/租金
 // 2.只读预执行估算本次转账需要的能量（不上链、不写 expiration）
 // 3.按估算值向第三方平台租赁能量，并等委托到账
@@ -278,113 +266,111 @@ func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet
 	if err != nil {
 		return err
 	}
-	//第2步：只读预执行估算能量。triggerconstantcontract 不校验发起地址的能量/TRX,
-	//也不返回带 expiration 的交易,所以它可以安全地排在租赁之前
+	// A retry after OUT_OF_ENERGY asks for more head room than the first attempt.
 	factor := energy.RetrySafetyFactor(attempts)
-	need, err := s.mgr.EstimateEnergyFactor(ctx, wallet.Address, token.Contract, data, factor)
-	if err != nil {
-		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, ",err:", err)
-		need = int64(float64(config.Cfg.Energy.EnergyPerTxNew) * factor)
-	}
-	// With rental off the deposit address pays its own energy and bandwidth, and a
-	// deposit address normally holds no TRX: without it the transfer would revert
-	// with OUT_OF_ENERGY, so the address is left for the next round and no sweep
-	// row is written for an attempt that never happened.
-	if !s.mgr.RentalEnabled() {
-		if err := s.checkBurnBudget(ctx, wallet.Address, need); err != nil {
-			s.log.Warn("skipping sweep, the address cannot burn the fee", "address", wallet.Address, ",err:", err)
+	// record and order exist from the energy step on: the sweep row is only
+	// written once the sweep is actually going to be attempted.
+	var record *model.SweepRecord
+	var order *model.EnergyRentOrder
+	_, err = s.exec.Send(ctx, transfer.Request{
+		Purpose:        signer.PurposeSweep,
+		From:           wallet.Address,
+		DerivePath:     wallet.DerivePath,
+		To:             finance,
+		Contract:       token.Contract,
+		Amount:         amount,
+		Data:           data,
+		FeeLimitSun:    config.Cfg.SweepServer.FeeLimitSun,
+		EnergyFactor:   factor,
+		FallbackEnergy: int64(float64(config.Cfg.Energy.EnergyPerTxNew) * factor),
+		ExpirationSec:  s.expirationSeconds(),
+	}, transfer.Hooks{
+		Energy: func(ctx context.Context, need int64) error {
+			// With rental off the deposit address pays its own energy and bandwidth,
+			// and a deposit address normally holds no TRX: without it the transfer
+			// would revert with OUT_OF_ENERGY, so the address is left for the next
+			// round and no sweep row is written for an attempt that never happened.
+			if !s.mgr.RentalEnabled() {
+				if err := s.checkBurnBudget(ctx, wallet.Address, need); err != nil {
+					s.log.Warn("skipping sweep, the address cannot burn the fee", "address", wallet.Address, ",err:", err)
+					return transfer.ErrStop
+				}
+			}
+			// Only the deposits that exist now are covered by this sweep; one that
+			// confirms while it is in flight keeps its unswept flag.
+			depositMaxID, err := s.maxUnsweptDepositID(ctx, token.Contract, wallet.Address)
+			if err != nil {
+				return err
+			}
+			record = &model.SweepRecord{
+				FromAddress:  wallet.Address,
+				ToAddress:    finance,
+				Symbol:       token.Symbol,
+				Contract:     token.Contract,
+				AmountUnits:  amount.String(),
+				Status:       model.SweepStateCreated,
+				RetryCount:   attempts,
+				DepositMaxID: depositMaxID,
+			}
+			if err := store.MyStore.DB.WithContext(ctx).Create(record).Error; err != nil {
+				return err
+			}
+			//按估算值租赁能量并等委托到账（关闭租赁时只登记为烧 TRX）
+			acquired, err := s.mgr.Acquire(ctx, "sweep", wallet.Address, need, fmt.Sprintf("sweep-%d", record.ID))
+			if err != nil {
+				return s.failSweep(ctx, record, FailCodeEnergyRental, fmt.Errorf("energy: %w", err))
+			}
+			order = acquired
+			store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
+				"status":       model.SweepStateEnergyOK,
+				"fee_mode":     energy.FeeMode(order.Provider),
+				"energy_order": order.RequestID,
+				"cost_trx":     order.CostTRX,
+				"updated_at":   time.Now(),
+			})
 			return nil
-		}
-	}
-	// Only the deposits that exist now are covered by this sweep; one that
-	// confirms while it is in flight keeps its unswept flag.
-	depositMaxID, err := s.maxUnsweptDepositID(ctx, token.Contract, wallet.Address)
-	if err != nil {
-		return err
-	}
-	record := &model.SweepRecord{
-		FromAddress:  wallet.Address,
-		ToAddress:    finance,
-		Symbol:       token.Symbol,
-		Contract:     token.Contract,
-		AmountUnits:  amount.String(),
-		Status:       model.SweepStateCreated,
-		RetryCount:   attempts,
-		DepositMaxID: depositMaxID,
-	}
-	if err := store.MyStore.DB.WithContext(ctx).Create(record).Error; err != nil {
-		return err
-	}
-
-	//第3步：按估算值租赁能量并等委托到账（关闭租赁时只登记为烧 TRX）
-	requestID := fmt.Sprintf("sweep-%d", record.ID)
-	order, err := s.mgr.Acquire(ctx, "sweep", wallet.Address, need, requestID)
-	if err != nil {
-		return s.failSweep(ctx, record, FailCodeEnergyRental, fmt.Errorf("energy: %w", err))
-	}
-	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
-		"status":       model.SweepStateEnergyOK,
-		"fee_mode":     energy.FeeMode(order.Provider),
-		"energy_order": order.RequestID,
-		"cost_trx":     order.CostTRX,
-		"updated_at":   time.Now(),
-	})
-
-	//第4步： 请求节点组装一个未签名的智能合约字节码编译以及区块链的实时状态数据
-	//交易对象(智能合约):组装一笔"触发已有 USDT 合约"的指令数据,并检查余额是否够
-	tx, err := s.gw.BuildTRC20Transfer(ctx, wallet.Address, token.Contract, data, config.Cfg.SweepServer.FeeLimitSun)
-	if err != nil {
-		return s.failSweep(ctx, record, chain.FailValidate, err)
-	}
-	//第5步：调用签名服务,用私钥签名
-	signed, err := s.sign.Sign(ctx, &signer.SignRequest{
-		Purpose: signer.PurposeSweep,
-		Path:    wallet.DerivePath,
-		Address: wallet.Address,
-		Tx:      tx,
-		Meta: signer.SignMeta{
-			ToAddress:   finance,
-			Contract:    token.Contract,
-			AmountUnits: amount.String(),
+		},
+		Fail: func(ctx context.Context, failCode string, cause error) error {
+			return s.failSweep(ctx, record, failCode, cause)
+		},
+		Signed: func(ctx context.Context, signed *transfer.Signed) error {
+			store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(
+				map[string]any{
+					"txid":       signed.TxID,
+					"signed_raw": signed.RawDataHex,
+					"expired_at": signed.ExpiredAt,
+					"updated_at": time.Now(),
+				})
+			return nil
+		},
+		Broadcast: func(ctx context.Context, out *transfer.Broadcast) error {
+			now := time.Now()
+			if out.Err != nil {
+				// A node that rejected the transaction for a permanent reason will
+				// never accept these bytes, so the row is failed now instead of being
+				// rebroadcast every round until it expires.
+				if out.Permanent {
+					return s.failSweep(ctx, record, out.FailCode, out.Err)
+				}
+				store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
+					"status": model.SweepStateBroadcast, "fail_reason": truncate(out.Err.Error(), 240),
+					"fail_code": out.FailCode, "updated_at": now,
+				})
+				return nil
+			}
+			store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
+				"status": model.SweepStateBroadcast, "txid": out.Result.TxID, "broadcast_at": now, "updated_at": now,
+			})
+			s.log.Info("sweep broadcast address: ", wallet.Address, "symbol: ", token.Symbol, "amount: ", amount.String(),
+				"txid", out.Result.TxID, "fee_mode", energy.FeeMode(order.Provider), "cost_trx", order.CostTRX)
+			return nil
 		},
 	})
-	if err != nil {
-		return s.failSweep(ctx, record, chain.FailSignature, err)
+	// The address is simply left for the next round: nothing was signed.
+	if errors.Is(err, transfer.ErrStop) {
+		return nil
 	}
-	expiry := time.Now().Add(time.Duration(s.expirationSeconds()) * time.Second)
-	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(
-		map[string]any{
-			"txid":       signed.TxID,
-			"signed_raw": signed.Tx.RawDataHex,
-			"expired_at": expiry,
-			"updated_at": time.Now(),
-		})
-	//第6步骤 广播
-	res, err := s.gw.Broadcast(ctx, signed.Tx)
-	if err != nil {
-		// A node that rejected the transaction for a permanent reason will never
-		// accept these bytes, so the row is failed now instead of being
-		// rebroadcast every round until it expires.
-		failCode, permanent := chain.FailNode, false
-		if res != nil {
-			failCode, permanent = chain.ClassifyBroadcast(res.Code, res.Message)
-		}
-		if permanent {
-			return s.failSweep(ctx, record, failCode, err)
-		}
-		store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
-			"status": model.SweepStateBroadcast, "fail_reason": truncate(err.Error(), 240),
-			"fail_code": failCode, "updated_at": time.Now(),
-		})
-		return err
-	}
-	now := time.Now()
-	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
-		"status": model.SweepStateBroadcast, "txid": res.TxID, "broadcast_at": now, "updated_at": now,
-	})
-	s.log.Info("sweep broadcast address: ", wallet.Address, "symbol: ", token.Symbol, "amount: ", amount.String(),
-		"txid", res.TxID, "fee_mode", energy.FeeMode(order.Provider), "cost_trx", order.CostTRX)
-	return nil
+	return err
 }
 
 func (s *Service) failSweep(ctx context.Context, record *model.SweepRecord, failCode string, cause error) error {
@@ -403,25 +389,16 @@ const FailCodeEnergyRental = "energy_rental"
 // energy and bandwidth of this transfer itself, which is what
 // energy.rental_enabled=false asks of it.
 func (s *Service) checkBurnBudget(ctx context.Context, address string, need int64) error {
-	params, err := s.gw.GetChainParameters(ctx)
+	budget, err := s.exec.BurnBudget(ctx, address, need)
 	if err != nil {
-		return fmt.Errorf("chain parameters query failed: %w", err)
+		return err
 	}
-	res, err := s.gw.GetAccountResource(ctx, address)
-	if err != nil {
-		return fmt.Errorf("account resource query failed: %w", err)
+	if limit := config.Cfg.SweepServer.FeeLimitSun; limit > 0 && budget.CostSun > limit {
+		return fmt.Errorf("burning TRX costs %d sun, above sweep_server.fee_limit_sun=%d", budget.CostSun, limit)
 	}
-	costSun := energy.BurnCostSun(res, params, need)
-	if limit := config.Cfg.SweepServer.FeeLimitSun; limit > 0 && costSun > limit {
-		return fmt.Errorf("burning TRX costs %d sun, above sweep_server.fee_limit_sun=%d", costSun, limit)
-	}
-	balance, err := s.gw.GetTRXBalance(ctx, address)
-	if err != nil {
-		return fmt.Errorf("TRX balance query failed: %w", err)
-	}
-	if balance < costSun {
+	if !budget.Enough() {
 		return fmt.Errorf("TRX insufficient to burn the fee: balance=%d sun required=%d sun (energy=%d)",
-			balance, costSun, need)
+			budget.BalanceSun, budget.CostSun, need)
 	}
 	return nil
 }
@@ -587,32 +564,23 @@ func (s *Service) settleAbsent(ctx context.Context, row model.SweepRecord, now t
 		}).Error
 }
 
-// rebroadcast re-signs the stored raw data (deterministic for the same key and
-// payload) and sends the identical bytes again.
+// rebroadcast sends the stored bytes of a signed sweep again.
 func (s *Service) rebroadcast(ctx context.Context, row model.SweepRecord) error {
 	var wallet model.UserWallet
 	if err := store.MyStore.DB.WithContext(ctx).
 		Where("address = ?", row.FromAddress).Take(&wallet).Error; err != nil {
 		return err
 	}
-	signed, err := s.sign.Sign(ctx, &signer.SignRequest{
-		Purpose: signer.PurposeSweep,
-		Path:    wallet.DerivePath,
-		Address: row.FromAddress,
-		Tx:      &tron.Transaction{TxID: row.TxID, RawDataHex: row.SignedRaw},
-		Meta: signer.SignMeta{
-			ToAddress:   row.ToAddress,
-			Contract:    row.Contract,
-			AmountUnits: row.AmountUnits,
-		},
+	res, err := s.exec.Rebroadcast(ctx, transfer.RebroadcastRequest{
+		Purpose:     signer.PurposeSweep,
+		From:        row.FromAddress,
+		DerivePath:  wallet.DerivePath,
+		To:          row.ToAddress,
+		Contract:    row.Contract,
+		AmountUnits: row.AmountUnits,
+		TxID:        row.TxID,
+		SignedRaw:   row.SignedRaw,
 	})
-	if err != nil {
-		return err
-	}
-	if signed.TxID != row.TxID {
-		return fmt.Errorf("sweep: refusing to rebroadcast, txid changed from %s to %s", row.TxID, signed.TxID)
-	}
-	res, err := s.gw.Broadcast(ctx, signed.Tx)
 	if err == nil {
 		return nil
 	}
@@ -635,9 +603,4 @@ func (s *Service) expirationSeconds() int64 {
 	return 60
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
+func truncate(s string, n int) string { return transfer.Truncate(s, n) }

@@ -217,6 +217,7 @@ func (m *Manager) acquire(ctx context.Context, purpose, receiver string, need in
 		RequestedEnergy: quote.BilledUnits,
 		Period:          quote.Period,
 		CostTRX:         quote.CostTRX,
+		Amount:          model.FormatTRX(quote.CostTRX),
 		Status:          model.EnergyOrderCreated,
 		Purpose:         purpose,
 		BaselineEnergy:  baseline,
@@ -280,6 +281,7 @@ func (m *Manager) AcquireBurn(ctx context.Context, purpose, receiver string, nee
 		RequestedEnergy: need,
 		Period:          m.defaultPeriod(),
 		CostTRX:         cost,
+		Amount:          model.FormatTRX(cost),
 		Status:          model.EnergyOrderCreated,
 		Purpose:         purpose,
 		BaselineEnergy:  m.availableEnergy(ctx, receiver),
@@ -394,6 +396,7 @@ func (m *Manager) markDelegated(ctx context.Context, row *model.EnergyRentOrder,
 		}
 		if order.CostTRX > 0 {
 			updates["cost_trx"] = order.CostTRX
+			updates["amount"] = model.FormatTRX(order.CostTRX)
 		}
 	}
 	if err := store.MyStore.DB.WithContext(ctx).Model(&model.EnergyRentOrder{}).

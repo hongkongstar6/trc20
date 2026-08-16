@@ -106,21 +106,25 @@ func (WalletIndexAllocator) TableName() string { return "wallet_index_allocator"
 // Uniqueness is (txid, event_index), which is also the downstream event id.
 // 光靠游标还不够，因为进程可能在扫到块、但还没保存游标之前就崩溃/重启，导致同一个块被重扫。为此，DepositRecord 表上以 (txid, event_index) 建了唯一索引 uq_tx_event
 type DepositRecord struct {
-	ID            int64      `gorm:"primaryKey" json:"id"`
-	MerchantID    string     `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
-	Account       string     `gorm:"column:account;index" json:"account"`
-	Uid           string     `gorm:"column:uid" json:"uid"`
-	TradeNo       string     `gorm:"size:64;uniqueIndex" json:"trade_no"` //交易订单号(我方生成订单号)
-	Chain         string     `gorm:"size:16" json:"chain"`
-	Symbol        string     `gorm:"size:16" json:"symbol"`
-	Contract      string     `gorm:"size:64" json:"contract"`
-	TxID          string     `gorm:"column:txid;size:70;uniqueIndex:uq_tx_event,priority:1" json:"txid"`
-	EventIndex    int        `gorm:"size:32;uniqueIndex:uq_tx_event,priority:2" json:"event_index"`
-	BlockNumber   int64      `gorm:"index" json:"block_number"`
-	BlockHash     string     `gorm:"size:70" json:"block_hash"`
-	FromAddress   string     `gorm:"size:64" json:"from_address"`
-	ToAddress     string     `gorm:"size:64;index" json:"to_address"`
-	AmountUnits   string     `gorm:"type:decimal(38,0)" json:"amount_units"`
+	ID          int64  `gorm:"primaryKey" json:"id"`
+	MerchantID  string `gorm:"column:merchant_id;size:30;index" json:"merchant_id"`
+	Account     string `gorm:"column:account;index" json:"account"`
+	Uid         string `gorm:"column:uid" json:"uid"`
+	TradeNo     string `gorm:"size:64;uniqueIndex" json:"trade_no"` //交易订单号(我方生成订单号)
+	Chain       string `gorm:"size:16" json:"chain"`
+	Symbol      string `gorm:"size:16" json:"symbol"`
+	Contract    string `gorm:"size:64" json:"contract"`
+	TxID        string `gorm:"column:txid;size:70;uniqueIndex:uq_tx_event,priority:1" json:"txid"`
+	EventIndex  int    `gorm:"size:32;uniqueIndex:uq_tx_event,priority:2" json:"event_index"`
+	BlockNumber int64  `gorm:"index" json:"block_number"`
+	BlockHash   string `gorm:"size:70" json:"block_hash"`
+	FromAddress string `gorm:"size:64" json:"from_address"`
+	ToAddress   string `gorm:"size:64;index" json:"to_address"`
+	AmountUnits string `gorm:"type:decimal(38,0)" json:"amount_units"`
+	// Amount is the same value in token units, as text: 13 USDT is "13" and
+	// 12.345678 USDT is "12.345678". It is derived from amount_units and
+	// decimals and is only there so a reader never counts zeros.
+	Amount        string     `gorm:"size:64" json:"amount"`
 	Decimals      int        `gorm:"size:32" json:"decimals"`
 	Confirmations int64      `json:"confirmations"`
 	Status        string     `gorm:"size:16;index" json:"status"`
@@ -152,9 +156,11 @@ type WithdrawRecord struct {
 	// the order. The final outcome of the order is always posted to it.
 	NotifyURL   string `gorm:"column:notify_url;size:255" json:"notify_url"`
 	AmountUnits string `gorm:"type:decimal(38,0)" json:"amount_units"`
-	Decimals    int    `gorm:"size:32" json:"decimals"`
-	Status      string `gorm:"size:16;index" json:"status"`
-	FailReason  string `gorm:"size:255" json:"fail_reason"`
+	// Amount is amount_units in token units, as text: "13" / "12.345678".
+	Amount     string `gorm:"size:64" json:"amount"`
+	Decimals   int    `gorm:"size:32" json:"decimals"`
+	Status     string `gorm:"size:16;index" json:"status"`
+	FailReason string `gorm:"size:255" json:"fail_reason"`
 	// FailCode is the classified reason (chain.Fail*), which is what retry and
 	// alerting branch on; FailReason keeps the raw node message.
 	FailCode string `gorm:"size:32;index" json:"fail_code"`
@@ -181,12 +187,15 @@ func (WithdrawRecord) TableName() string { return "withdraw_record" }
 
 // SweepRecord moves a user deposit address balance into the finance wallet.
 type SweepRecord struct {
-	ID          int64      `gorm:"primaryKey" json:"id"`
-	FromAddress string     `gorm:"size:64;index" json:"from_address"`
-	ToAddress   string     `gorm:"size:64" json:"to_address"`
-	Symbol      string     `gorm:"size:16" json:"symbol"`
-	Contract    string     `gorm:"size:64" json:"contract"`
-	AmountUnits string     `gorm:"type:decimal(38,0)" json:"amount_units"`
+	ID          int64  `gorm:"primaryKey" json:"id"`
+	FromAddress string `gorm:"size:64;index" json:"from_address"`
+	ToAddress   string `gorm:"size:64" json:"to_address"`
+	Symbol      string `gorm:"size:16" json:"symbol"`
+	Contract    string `gorm:"size:64" json:"contract"`
+	AmountUnits string `gorm:"type:decimal(38,0)" json:"amount_units"`
+	// Amount is amount_units in token units, as text: "13" / "12.345678".
+	Amount      string     `gorm:"size:64" json:"amount"`
+	Decimals    int        `gorm:"size:32" json:"decimals"`
 	Status      string     `gorm:"size:16;index" json:"status"`
 	TxID        string     `gorm:"column:txid;size:70;index" json:"txid"`
 	SignedRaw   string     `gorm:"type:text" json:"-"`
@@ -255,9 +264,12 @@ type EnergyRentOrder struct {
 	// BaselineEnergy is the energy the receiving address could already spend
 	// when the order was placed. The delegation is confirmed against this
 	// baseline instead of the absolute balance.
-	BaselineEnergy int64      `json:"baseline_energy"`
-	Period         string     `gorm:"size:16" json:"period"`
-	CostTRX        float64    `json:"cost_trx"`
+	BaselineEnergy int64   `json:"baseline_energy"`
+	Period         string  `gorm:"size:16" json:"period"`
+	CostTRX        float64 `json:"cost_trx"`
+	// Amount is what this order pays the provider, in TRX, as text: "13" /
+	// "12.345678". It mirrors cost_trx without float formatting surprises.
+	Amount         string     `gorm:"size:64" json:"amount"`
 	Status         string     `gorm:"size:16;index" json:"status"`
 	ProviderStatus string     `gorm:"size:32" json:"provider_status"`
 	DelegateTxID   string     `gorm:"column:delegate_txid;size:70" json:"delegate_txid"`
@@ -271,12 +283,14 @@ func (EnergyRentOrder) TableName() string { return "energy_rent_order" }
 
 // TopupRecord audits every prepaid balance refill, automatic or manual.
 type TopupRecord struct {
-	ID                int64      `gorm:"primaryKey" json:"id"`
-	Provider          string     `gorm:"size:32;index" json:"provider"`
-	RequestID         string     `gorm:"size:64;uniqueIndex" json:"request_id"`
-	FromAddress       string     `gorm:"size:64" json:"from_address"`
-	ToAddress         string     `gorm:"size:64" json:"to_address"`
-	AmountTRX         float64    `json:"amount_trx"`
+	ID          int64   `gorm:"primaryKey" json:"id"`
+	Provider    string  `gorm:"size:32;index" json:"provider"`
+	RequestID   string  `gorm:"size:64;uniqueIndex" json:"request_id"`
+	FromAddress string  `gorm:"size:64" json:"from_address"`
+	ToAddress   string  `gorm:"size:64" json:"to_address"`
+	AmountTRX   float64 `json:"amount_trx"`
+	// Amount is amount_trx as text: "13" / "12.345678".
+	Amount            string     `gorm:"size:64" json:"amount"`
 	TriggerBalanceTRX float64    `json:"trigger_balance_trx"`
 	TxID              string     `gorm:"column:txid;size:70;index" json:"txid"`
 	Status            string     `gorm:"size:16;index" json:"status"`

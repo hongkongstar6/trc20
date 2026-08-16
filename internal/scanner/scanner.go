@@ -448,6 +448,7 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 		FromAddress: t.from,
 		ToAddress:   t.to,
 		AmountUnits: t.amount.String(),
+		Amount:      model.FormatUnits(t.amount.String(), t.token.decimals),
 		Decimals:    t.token.decimals,
 		Status:      model.DepositStatePending,
 		Internal:    internal || wallet.Purpose != "deposit",

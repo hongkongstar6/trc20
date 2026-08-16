@@ -413,6 +413,7 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		ToAddress:   req.ToAddress,
 		NotifyURL:   req.NotifyUrl,
 		AmountUnits: amount.String(),
+		Amount:      model.FormatUnits(amount.String(), token.Decimals),
 		Decimals:    token.Decimals,
 		Status:      model.WithdrawStateCreated,
 		FromAddress: config.Cfg.Wallet.HotWallet.Address,

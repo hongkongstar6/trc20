@@ -414,9 +414,10 @@ func (s *Scanner) parseLog(ctx context.Context, info *chain.TxInfo, lg chain.TxL
 	// recipient on chain, so only the few possible hits reach MySQL.
 	if !bloom.AddrFilter.MayContain(t.to) {
 		//logrus.Debug("地址不属于本系统：", t.to)
+		//logrus.Debug("地址不属于本系统：", t.to)
 		return nil, false, nil
 	}
-	//logrus.Info("发起地址:", t.from, "收款地址:", t.to)
+	logrus.Info("发起地址:", t.from, "收款地址:", t.to)
 	var wallet model.UserWallet
 	err := store.MyStore.DB.WithContext(ctx).Where("address = ?", t.to).Take(&wallet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

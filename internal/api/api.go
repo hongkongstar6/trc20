@@ -422,12 +422,7 @@ func (s *Server) createWithdraw(c *gin.Context) {
 		// Duplicate submission: return the existing order instead of failing.
 		var existing model.WithdrawRecord
 		if e := store.MyStore.DB.WithContext(c).Where("order_no = ?", req.OrderNo).Take(&existing).Error; e == nil {
-			c.JSON(http.StatusOK, createWithdrawResponse{
-				MerchantId: existing.MerchantID,
-				OrderNo:    existing.OrderNo,
-				TradeNo:    existing.TradeNo,
-				CreateTime: existing.CreatedAt.Unix(),
-			})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "订单号重复: " + req.OrderNo})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -41,14 +41,14 @@ func main() {
 		logrus.Error("energy manager init failed ", ",err:", err)
 		return
 	}
-	pricer := energy.NewPricer(config.Cfg.SweepServer.Threshold, config.Cfg.Energy, mgr, app.Gateway, nil)
+	pricer := energy.NewPricer(config.Cfg.SweepServer.Threshold, config.Cfg.Energy, mgr, app.Gateway)
 	go func() {
 		if err := pricer.Run(ctx); err != nil {
 			logrus.Error("pricer stopped", ",err:", err)
 		}
 	}()
 
-	topup := energy.NewTopup(config.Cfg.Energy.AutoTopup, store.MyStore, app.Gateway, signClient, nil,
+	topup := energy.NewTopup(config.Cfg.Energy.AutoTopup, store.MyStore, app.Gateway, signClient,
 		mgr.Providers(), config.Cfg.Wallet.GasAccount.Path)
 	// Both loops only exist to serve the rental platforms: with
 	// energy.rental_enabled=false there is no order to reconcile and no prepaid

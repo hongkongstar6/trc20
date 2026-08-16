@@ -40,7 +40,7 @@ type Topup struct {
 	//log     *logrus.Logger
 }
 
-func NewTopup(cfg config.AutoTopupConfig, st *store.Store, gw *chain.Gateway, sign *signer.Client, log *logrus.Logger, provs map[string]Provider, gasPath string) *Topup {
+func NewTopup(cfg config.AutoTopupConfig, st *store.Store, gw *chain.Gateway, sign *signer.Client, provs map[string]Provider, gasPath string) *Topup {
 	return &Topup{cfg: cfg, gw: gw, signer: sign, provs: provs, gasPath: gasPath}
 }
 

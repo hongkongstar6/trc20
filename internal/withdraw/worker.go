@@ -215,6 +215,7 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 	// order must not be failed for it either because the money is only missing
 	// until finance refills the wallet.
 	if err := w.checkBalance(ctx, row, token, hot.Address, amount); err != nil {
+		logrus.Error("worker.go err:", err)
 		return err
 	}
 

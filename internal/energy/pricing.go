@@ -24,11 +24,11 @@ import (
 //	min_sweep = max(cost_usd / target_cost_ratio, cost_usd * safety_multiple)
 //	min_sweep = clamp(min_sweep, min_usdt, max_usdt)
 type Pricer struct {
-	cfg       config.SweepThresholdConfig
-	energy    config.EnergyConfig
-	mgr       *Manager
-	gw        *chain.Gateway
-	log       *logrus.Logger
+	cfg    config.SweepThresholdConfig
+	energy config.EnergyConfig
+	mgr    *Manager
+	gw     *chain.Gateway
+	//log       *logrus.Logger
 	mu        sync.RWMutex
 	threshold float64
 	costUSD   float64
@@ -36,18 +36,18 @@ type Pricer struct {
 	refreshed time.Time
 }
 
-func NewPricer(threshold config.SweepThresholdConfig, energyCfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway, log *logrus.Logger) *Pricer {
-	if log == nil {
-		log = logrus.StandardLogger()
-	}
-	return &Pricer{cfg: threshold, energy: energyCfg, mgr: mgr, gw: gw, log: log, trxUSD: threshold.TRXPriceUSD}
+func NewPricer(threshold config.SweepThresholdConfig, energyCfg config.EnergyConfig, mgr *Manager, gw *chain.Gateway) *Pricer {
+	// if log == nil {
+	// 	log = logrus.StandardLogger()
+	// }
+	return &Pricer{cfg: threshold, energy: energyCfg, mgr: mgr, gw: gw, trxUSD: threshold.TRXPriceUSD}
 }
 
 // Run refreshes the threshold periodically and logs every change for audit.
 func (p *Pricer) Run(ctx context.Context) error {
 	interval := config.Duration(p.cfg.RefreshInterval, 10*time.Minute)
 	if err := p.Refresh(ctx); err != nil {
-		p.log.Error("initial threshold refresh failed", ",err:", err)
+		logrus.Error("initial threshold refresh failed", ",err:", err)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -57,7 +57,7 @@ func (p *Pricer) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := p.Refresh(ctx); err != nil {
-				p.log.Error("threshold refresh failed", ",err:", err)
+				logrus.Error("threshold refresh failed", ",err:", err)
 			}
 		}
 	}
@@ -108,7 +108,7 @@ func (p *Pricer) Refresh(ctx context.Context) error {
 
 	trxUSD, err := p.trxPrice(ctx)
 	if err != nil {
-		p.log.Warn("trx price lookup failed, using previous value", ",err:", err)
+		logrus.Warn("trx price lookup failed, using previous value", ",err:", err)
 	}
 	if trxUSD <= 0 {
 		return fmt.Errorf("no TRX price available")
@@ -134,15 +134,15 @@ func (p *Pricer) Refresh(ctx context.Context) error {
 	p.mu.Unlock()
 
 	if previous != threshold {
-		p.log.Info("sweep threshold updated",
-			"provider", quote.Provider,
-			"energy", need,
-			"energy_fee_sun", params.EnergyFeeSun,
-			"cost_trx", costTRX,
-			"trx_usd", trxUSD,
-			"cost_usd", costUSD,
-			"min_sweep_usdt", threshold,
-			"previous", previous)
+		logrus.Info("sweep threshold updated",
+			",provider:", quote.Provider,
+			",energy:", need,
+			",energy_fee_sun:", params.EnergyFeeSun,
+			",cost_trx:", costTRX,
+			",trx_usd:", trxUSD,
+			",cost_usd:", costUSD,
+			",min_sweep_usdt:", threshold,
+			",previous:", previous)
 	}
 	return nil
 }

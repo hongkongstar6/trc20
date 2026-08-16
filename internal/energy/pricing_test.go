@@ -7,7 +7,7 @@ import (
 )
 
 func TestMinSweepUSDTFixedOverridesRuntimeThreshold(t *testing.T) {
-	p := NewPricer(config.SweepThresholdConfig{FixedUSDT: 100, MinUSDT: 50}, config.EnergyConfig{}, nil, nil, nil)
+	p := NewPricer(config.SweepThresholdConfig{FixedUSDT: 100, MinUSDT: 50}, config.EnergyConfig{}, nil, nil)
 	p.threshold = 320
 	if got := p.MinSweepUSDT(); got != 100 {
 		t.Fatalf("MinSweepUSDT = %v, want 100", got)
@@ -15,7 +15,7 @@ func TestMinSweepUSDTFixedOverridesRuntimeThreshold(t *testing.T) {
 }
 
 func TestMinSweepUSDTWithoutFixedFallsBackToMin(t *testing.T) {
-	p := NewPricer(config.SweepThresholdConfig{MinUSDT: 50}, config.EnergyConfig{}, nil, nil, nil)
+	p := NewPricer(config.SweepThresholdConfig{MinUSDT: 50}, config.EnergyConfig{}, nil, nil)
 	if got := p.MinSweepUSDT(); got != 50 {
 		t.Fatalf("MinSweepUSDT = %v, want 50", got)
 	}

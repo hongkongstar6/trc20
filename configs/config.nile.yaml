@@ -136,6 +136,10 @@ withdraw_server:
     # 提现因热钱包 USDT/TRX 不足、能量租不到等需人工处理的原因停下时，最多重试多少轮；
     # 达到该次数后订单直接结单为提现失败，并把失败原因回调给业务系统（不再一直告警重试）。
     halt_max_retries: 2
+    # 提现的能量/带宽来源：true 从第三方平台租赁，false 烧热钱包自己的 TRX。
+    # 两条途径互不兜底：租赁失败不会改成烧 TRX，热钱包没有 TRX 也不会改成租赁，
+    # 都是直接停下本次提现并打 error 日志。留空则跟随 energy.rental_enabled。
+    energy_rental: false # Nile 没有租赁测试环境，只能烧地址自己的 TRX
     # 提现黑名单在数据库表 address_blacklist 中维护
 
 sweep_server:
@@ -149,6 +153,9 @@ sweep_server:
     # （1.15 → 1.3 → 1.5）。用完后该地址不再自动归集，只打告警日志等人工处理，
     # 避免同一个地址每轮都白烧一次手续费。
     max_energy_retries: 3
+    # 归集的能量/带宽来源，语义同 withdraw_server.energy_rental：
+    # true 从第三方平台租赁，false 烧归集地址自己的 TRX，二者互不兜底。
+    energy_rental: false # Nile 没有租赁测试环境，只能烧地址自己的 TRX
     threshold:
         # min_sweep is computed at runtime, never hard coded:
         #   cost_usd  = (energy quote + bandwidth burn) * TRX/USD

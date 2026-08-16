@@ -34,7 +34,7 @@ const FailCodeRejected = "risk_rejected"
 const (
 	FailCodeInsufficientBalance = "hot_wallet_insufficient"
 	FailCodeEnergyRental        = "energy_rental_failed"
-	// FailCodeInsufficientTRX is only used with energy.rental_enabled=false,
+	// FailCodeInsufficientTRX is only used with withdraw_server.energy_rental=false,
 	// where the transfer burns the hot wallet's own TRX for energy and bandwidth.
 	FailCodeInsufficientTRX = "hot_wallet_trx_insufficient"
 )
@@ -152,7 +152,7 @@ func (w *Worker) preflight(ctx context.Context) {
 		logrus.Warn("withdraw preflight: 热钱包 TRX 余额查询失败", ",err:", err)
 	} else {
 		logrus.Info("withdraw preflight", ",hot_wallet:", hot.Address, ",trx_balance_sun:", trx,
-			",rental_enabled:", w.mgr.RentalEnabled(), ",fee_limit_sun:", config.Cfg.WithdrawServer.FeeLimitSun)
+			",energy_rental:", config.Cfg.WithdrawRentalOn(), ",fee_limit_sun:", config.Cfg.WithdrawServer.FeeLimitSun)
 	}
 }
 
@@ -227,19 +227,19 @@ func (w *Worker) execute(ctx context.Context, row *model.WithdrawRecord) error {
 		logrus.Warn("withdraw energy estimate failed, using worst case", ",err:", err)
 		need = config.Cfg.Energy.EnergyPerTxNew
 	}
-	if !w.mgr.RentalEnabled() {
-		// energy.rental_enabled=false: nothing is rented, the transfer pays its
-		// own energy and bandwidth out of the hot wallet's TRX, so the TRX has to
-		// be there before anything is signed.
+	// withdraw_server.energy_rental decides where the fee comes from, and the two
+	// ways never cover for each other: a rental outage does not start burning the
+	// hot wallet's TRX at several times the price, and a hot wallet without TRX
+	// does not silently rent instead. Either way the order stops and alerts.
+	if !config.Cfg.WithdrawRentalOn() {
 		if err := w.checkBurnBudget(ctx, row, hot.Address, need); err != nil {
 			return err
 		}
 	} else if w.pool == nil || !w.pool.HasEnergyFor(ctx, need) {
 		requestID := fmt.Sprintf("withdraw-%d", row.ID)
-		// Burning TRX is never an acceptable fallback here: it silently drains
-		// the hot wallet's TRX at several times the rental price, so a rental
-		// outage stops the withdrawal and alerts instead.
 		if _, err := w.mgr.AcquireRented(ctx, "withdraw", hot.Address, need, requestID); err != nil {
+			logrus.Error("withdraw stopped, 能量租赁失败（withdraw_server.energy_rental=true，不回退烧 TRX）",
+				",order_no:", row.OrderNo, ",hot_wallet:", hot.Address, ",energy_need:", need, ",err:", err)
 			return w.halt(ctx, row, FailCodeEnergyRental,
 				fmt.Sprintf("energy rental failed, withdrawal stopped (no TRX burn fallback): %v", err))
 		}
@@ -371,6 +371,8 @@ func (w *Worker) checkBurnBudget(ctx context.Context, row *model.WithdrawRecord,
 	}
 	costSun := energy.BurnCostSun(res, params, need)
 	if limit := config.Cfg.WithdrawServer.FeeLimitSun; limit > 0 && costSun > limit {
+		logrus.Error("withdraw stopped, 烧 TRX 的手续费超过 fee_limit_sun（不回退租赁）",
+			",order_no:", row.OrderNo, ",cost_sun:", costSun, ",fee_limit_sun:", limit)
 		return w.halt(ctx, row, FailCodeInsufficientTRX, fmt.Sprintf(
 			"burning TRX for this transfer costs %d sun, above withdraw_server.fee_limit_sun=%d",
 			costSun, limit))
@@ -384,6 +386,9 @@ func (w *Worker) checkBurnBudget(ctx context.Context, row *model.WithdrawRecord,
 			",energy_need:", need, ",cost_sun:", costSun, ",trx_balance_sun:", balance)
 		return nil
 	}
+	logrus.Error("withdraw stopped, 热钱包 TRX 不足以支付能量/带宽（withdraw_server.energy_rental=false，不回退租赁）",
+		",order_no:", row.OrderNo, ",hot_wallet:", from, ",trx_balance_sun:", balance,
+		",required_sun:", costSun, ",energy_need:", need)
 	return w.halt(ctx, row, FailCodeInsufficientTRX, fmt.Sprintf(
 		"hot wallet TRX insufficient to burn the fee: balance=%d sun required=%d sun (energy=%d)",
 		balance, costSun, need))

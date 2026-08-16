@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,52 @@ func parseLimit(c *gin.Context, def, max int) int {
 		return max
 	}
 	return v
+}
+
+// parseTokenAmount converts a withdrawal amount expressed in the token's own
+// unit into the minimum units the chain transfers: with 6 decimals "11" is
+// 11 USDT (11000000 units) and "0.5" is 500000 units. Everything downstream
+// (the record, the transfer, the risk limits) keeps working in minimum units.
+func parseTokenAmount(amount string, decimals int) (*big.Int, error) {
+	if decimals < 0 {
+		return nil, fmt.Errorf("token decimals must not be negative")
+	}
+	text := strings.TrimSpace(amount)
+	whole, frac := text, ""
+	if i := strings.IndexByte(text, '.'); i >= 0 {
+		whole, frac = text[:i], text[i+1:]
+	}
+	if whole == "" {
+		whole = "0"
+	}
+	if !isDigits(whole) || (frac != "" && !isDigits(frac)) {
+		return nil, fmt.Errorf("amount must be a decimal number in token units")
+	}
+	if len(frac) > decimals {
+		return nil, fmt.Errorf("amount has more than %d decimal places", decimals)
+	}
+	// Padding the fraction to the token precision turns the decimal amount into
+	// minimum units without any float rounding.
+	units, ok := new(big.Int).SetString(whole+frac+strings.Repeat("0", decimals-len(frac)), 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid amount")
+	}
+	if units.Sign() <= 0 {
+		return nil, fmt.Errorf("amount must be positive")
+	}
+	return units, nil
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // splitEventID parses the "<txid>:<event_index>" deposit event id.

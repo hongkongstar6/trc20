@@ -57,6 +57,36 @@ func TestParseLimitClamps(t *testing.T) {
 	}
 }
 
+func TestParseTokenAmountScalesToMinimumUnits(t *testing.T) {
+	for _, tc := range []struct {
+		amount string
+		want   string
+	}{
+		{"10", "10000000"},
+		{"11", "11000000"},
+		{"99", "99000000"},
+		{"0.5", "500000"},
+		{"1.000001", "1000001"},
+		{" 2.5 ", "2500000"},
+	} {
+		got, err := parseTokenAmount(tc.amount, 6)
+		if err != nil {
+			t.Fatalf("parseTokenAmount(%q): %v", tc.amount, err)
+		}
+		if got.String() != tc.want {
+			t.Fatalf("parseTokenAmount(%q) = %s, want %s", tc.amount, got, tc.want)
+		}
+	}
+}
+
+func TestParseTokenAmountRejectsBadInput(t *testing.T) {
+	for _, amount := range []string{"", "0", "0.0", "-1", "abc", "1,5", "1.2.3", "0.0000001"} {
+		if got, err := parseTokenAmount(amount, 6); err == nil {
+			t.Fatalf("parseTokenAmount(%q) = %s, should have failed", amount, got)
+		}
+	}
+}
+
 func TestSplitEventID(t *testing.T) {
 	txid, index, err := splitEventID("abc123:4")
 	if err != nil {

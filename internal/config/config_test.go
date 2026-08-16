@@ -428,6 +428,54 @@ func TestRentalDisabledPinsBurnAndStopsRentalLoops(t *testing.T) {
 	}
 }
 
+// Sweep and withdraw each choose their own energy source, and an unset flow key
+// keeps following the global energy.rental_enabled.
+func TestPerFlowEnergyRentalFallsBackToGlobal(t *testing.T) {
+	off := false
+	c := &Config{Energy: EnergyConfig{RentalEnabled: &off}}
+	c.applyDefaults()
+	if c.SweepRentalOn() || c.WithdrawRentalOn() {
+		t.Fatalf("sweep=%v withdraw=%v, want both off", c.SweepRentalOn(), c.WithdrawRentalOn())
+	}
+	on := true
+	c = &Config{Energy: EnergyConfig{RentalEnabled: &on}}
+	c.applyDefaults()
+	if !c.SweepRentalOn() || !c.WithdrawRentalOn() {
+		t.Fatalf("sweep=%v withdraw=%v, want both on", c.SweepRentalOn(), c.WithdrawRentalOn())
+	}
+}
+
+// Renting for sweeps while withdrawals burn TRX has to keep the rental stack
+// built for sweeps, price the burn through trx_burn, and drop the hot wallet
+// energy pool that only serves rented withdrawals.
+func TestSweepRentsWhileWithdrawBurns(t *testing.T) {
+	on, off := true, false
+	c := &Config{
+		SweepServer:    SweepConfig{EnergyRental: &on},
+		WithdrawServer: WithdrawConfig{EnergyRental: &off},
+		Energy: EnergyConfig{
+			Mode:      "cheapest",
+			Providers: map[string]ProviderConf{"gasstation": {Enabled: true}},
+			Pool:      EnergyPoolConfig{Enabled: true},
+		},
+	}
+	c.applyDefaults()
+	if !c.SweepRentalOn() || c.WithdrawRentalOn() {
+		t.Fatalf("sweep=%v withdraw=%v, want sweep renting and withdraw burning",
+			c.SweepRentalOn(), c.WithdrawRentalOn())
+	}
+	if c.Energy.Mode != "cheapest" || !c.Energy.RentalOn() {
+		t.Fatalf("mode=%q rental=%v, want the rental stack kept for sweeps",
+			c.Energy.Mode, c.Energy.RentalOn())
+	}
+	if !c.Energy.Providers[ProviderTRXBurn].Enabled {
+		t.Fatal("trx_burn provider is not enabled, the withdrawal burn cannot be priced")
+	}
+	if c.Energy.Pool.Enabled {
+		t.Fatal("hot wallet energy pool is still on for withdrawals that burn TRX")
+	}
+}
+
 // A business request carries the symbol in whatever case the merchant sent it,
 // so resolving it must ignore case and must never return a disabled token.
 func TestEnabledTokenResolvesSymbolCaseInsensitively(t *testing.T) {

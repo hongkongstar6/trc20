@@ -286,13 +286,15 @@ func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet
 		s.log.Warn("energy estimate failed, using configured worst case", "address", wallet.Address, ",err:", err)
 		need = int64(float64(config.Cfg.Energy.EnergyPerTxNew) * factor)
 	}
-	// With rental off the deposit address pays its own energy and bandwidth, and a
-	// deposit address normally holds no TRX: without it the transfer would revert
-	// with OUT_OF_ENERGY, so the address is left for the next round and no sweep
-	// row is written for an attempt that never happened.
-	if !s.mgr.RentalEnabled() {
+	// sweep_server.energy_rental=false makes the deposit address pay its own
+	// energy and bandwidth, and a deposit address normally holds no TRX: without
+	// it the transfer would revert with OUT_OF_ENERGY, so the sweep stops here
+	// and no row is written for an attempt that never happened.
+	rental := config.Cfg.SweepRentalOn()
+	if !rental {
 		if err := s.checkBurnBudget(ctx, wallet.Address, need); err != nil {
-			s.log.Warn("skipping sweep, the address cannot burn the fee", "address", wallet.Address, ",err:", err)
+			s.log.Error("sweep stopped, TRX 不足以支付本次归集的能量/带宽（sweep_server.energy_rental=false）",
+				"address", wallet.Address, "symbol", token.Symbol, ",err:", err)
 			return nil
 		}
 	}
@@ -316,10 +318,18 @@ func (s *Service) sweepOne(ctx context.Context, token config.TokenConfig, wallet
 		return err
 	}
 
-	//第3步：按估算值租赁能量并等委托到账（关闭租赁时只登记为烧 TRX）
+	//第3步：按估算值租赁能量并等委托到账（配置为烧 TRX 时只登记，不下单）
+	// 两条途径互不兜底：租不到能量就结束本次归集并报错，绝不改成烧 TRX。
 	requestID := fmt.Sprintf("sweep-%d", record.ID)
-	order, err := s.mgr.Acquire(ctx, "sweep", wallet.Address, need, requestID)
+	var order *model.EnergyRentOrder
+	if rental {
+		order, err = s.mgr.AcquireRented(ctx, "sweep", wallet.Address, need, requestID)
+	} else {
+		order, err = s.mgr.AcquireBurn(ctx, "sweep", wallet.Address, need, requestID)
+	}
 	if err != nil {
+		s.log.Error("sweep stopped, 本次归集拿不到能量（两条途径互不兜底）",
+			"address", wallet.Address, "symbol", token.Symbol, "energy_rental", rental, ",err:", err)
 		return s.failSweep(ctx, record, FailCodeEnergyRental, fmt.Errorf("energy: %w", err))
 	}
 	store.MyStore.DB.WithContext(ctx).Model(record).UpdateColumns(map[string]any{
